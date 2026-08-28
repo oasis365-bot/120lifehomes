@@ -9,23 +9,21 @@
 //         수동 호출은 ?secret=$CRON_SECRET.
 import { haveDb, sb } from '../lib/db.js';
 
-const BASE = process.env.DATA_GO_KR_BASE || 'https://apis.data.go.kr/B550928/searchLtcInsttService01';
+// 진단 결과: 이 경로만 "등록되지 않은 서비스키"(=경로는 존재) 응답.
+const BASE = process.env.DATA_GO_KR_BASE || 'https://apis.data.go.kr/B550928/searchLtcInsttService';
+const OP = process.env.DATA_GO_KR_OP || 'getBillGreentInsttSearchList';
 
-// base + operation 조합 후보. 확인되면 DATA_GO_KR_BASE / DATA_GO_KR_OP 로 고정.
 const BASE_CANDIDATES = [
   process.env.DATA_GO_KR_BASE,
-  'https://apis.data.go.kr/B550928/searchLtcInsttService01',
   'https://apis.data.go.kr/B550928/searchLtcInsttService',
-  'https://apis.data.go.kr/B550928/orgInfoService',
+  'https://apis.data.go.kr/B550928/searchLtcInsttService01',
 ].filter(Boolean);
 
 const OP_CANDIDATES = [
   process.env.DATA_GO_KR_OP,
-  'getBillGreentInsttSearchList01',
   'getBillGreentInsttSearchList',
+  'getBillGreentInsttSearchList01',
   'getLtcInsttSearchList',
-  'getEasyBGgList',
-  'getInsttSearchList',
 ].filter(Boolean);
 
 export default async function handler(req, res) {
@@ -139,9 +137,36 @@ async function fetchRaw(key, op, pageNo, numOfRows, extra = {}, base = BASE) {
   return { httpStatus: r.status, contentType: r.headers.get('content-type'), text, url };
 }
 
+// 알려진 경로에 대해 serviceKey 형태를 바꿔가며 테스트
+async function keyVariants(key) {
+  const base = 'https://apis.data.go.kr/B550928/searchLtcInsttService';
+  const op = 'getBillGreentInsttSearchList';
+  let decodedOnce = key;
+  try { decodedOnce = key.includes('%') ? decodeURIComponent(key) : key; } catch {}
+  const variants = {
+    'raw(as-stored)': key,
+    'encodeURIComponent(raw)': encodeURIComponent(key),
+    'decodedOnce': decodedOnce,
+    'encodeURIComponent(decodedOnce)': encodeURIComponent(decodedOnce),
+  };
+  const out = {};
+  for (const [label, sk] of Object.entries(variants)) {
+    try {
+      const url = `${base}/${op}?serviceKey=${sk}&pageNo=1&numOfRows=2&_type=json`;
+      const r = await fetch(url);
+      const t = await r.text();
+      out[label] = { http: r.status, head: t.slice(0, 220) };
+    } catch (e) {
+      out[label] = { error: String(e.message || e).slice(0, 150) };
+    }
+  }
+  return out;
+}
+
 // 모든 base × op 조합을 훑어 에러메시지를 수집한다.
 async function diag(key) {
   const results = [];
+  const keyTest = await keyVariants(key);
   for (const base of BASE_CANDIDATES) {
     for (const op of OP_CANDIDATES) {
       try {
@@ -177,6 +202,7 @@ async function diag(key) {
   return {
     keyLooksEncoded: key.includes('%'),
     keyLen: key.length,
+    keyTest,
     results,
   };
 }
