@@ -67,6 +67,30 @@ export default async function handler(req, res) {
       res.status(200).json(await resolveBase(key));
       return;
     }
+    if (mode === 'ft') {
+      const base = 'https://apis.data.go.kr/B550928/searchLtcInsttService02';
+      const tests = [
+        ['getLtcInsttSeachList02', { siDoCd: '11' }],
+        ['getLtcInsttSeachList02', { siDoCd: '11', siGunGuCd: '680' }],
+        ['getLtcInsttSeachList02', { serviceKind: '01' }],
+        ['getLtcInsttSeachList02', { serviceKind: '05' }],
+        ['getBillGreentInsttSearchList02', { siDoCd: '11' }],
+      ];
+      const out = [];
+      for (const [op, extra] of tests) {
+        const p = parseResponse((await callApi(key, base, 1, 3, extra, op)).text);
+        out.push({
+          op,
+          extra,
+          resultCode: p.resultCode,
+          totalCount: p.totalCount,
+          firstKeys: p.items[0] ? Object.keys(p.items[0]) : null,
+          first: p.items[0] || null,
+        });
+      }
+      res.status(200).json(out);
+      return;
+    }
     if (mode === 'ops') {
       const out = [];
       for (const base of BASE_CANDIDATES) {
