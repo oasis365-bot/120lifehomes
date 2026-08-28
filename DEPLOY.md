@@ -62,23 +62,45 @@ git push -u origin main
 
 ---
 
-## 4. (이후 단계) 백엔드 — Supabase + 공공데이터 연동
+## 4. 백엔드 — Supabase + 공공데이터 연동
 
-이 폴더에 추가될 것들 (아직 없음):
-- `.env.example` → 실제 키는 `.env`(로컬)와 Vercel 환경변수에만
-- `api/` 또는 `app/api/` — 상담접수 저장, 시설 조회 API
-- `scripts/ingest.*` — 공공데이터포털(장기요양기관 검색 서비스) 일 1회 수집 → Supabase upsert
-- `admin/` — 상담 접수 목록·시설 관리 페이지
+코드는 이미 추가됨:
+- `db/schema.sql` — Supabase 테이블(facilities / consultations / reviews) + RLS
+- `lib/db.js` — Supabase REST 래퍼 (service_role, 의존성 없음)
+- `api/consult.js` — 상담 접수 저장 (POST /api/consult)
+- `api/facilities.js` — 시설 검색 (GET /api/facilities?sido=&type=&q=&...)
+- `api/facility.js` — 시설 상세 (GET /api/facility?id=)
+- `api/ingest.js` — 공공데이터 수집 (GET /api/ingest, Vercel Cron 매일 03:00 KST)
+- `vercel.json` → `crons` 등록
 
-Supabase 준비:
-1. https://supabase.com → GitHub 로그인 → `New project` (Region: **Northeast Asia (Seoul)**)
-2. `Project URL` 과 `anon key`, `service_role key` 확보 → Vercel 환경변수에 입력
-3. 제공되는 SQL 편집기에 제가 만든 테이블 스키마 실행
+### 4-1. Supabase
+1. https://supabase.com → Continue with GitHub → **New project**
+   - Region: **Northeast Asia (Seoul)**, DB 비밀번호 저장
+2. **Settings → API** 에서 복사: `Project URL`, `service_role` `secret` key
+3. **SQL Editor** → `db/schema.sql` 내용 붙여넣고 **Run**
 
-공공데이터포털:
-1. https://www.data.go.kr → 회원가입
-2. "국민건강보험공단_장기요양기관 검색 서비스" 활용신청 → 서비스키 발급
-3. 서비스키를 Vercel 환경변수 `DATA_GO_KR_KEY` 로 저장
+### 4-2. 공공데이터포털
+1. https://www.data.go.kr 회원가입
+2. https://www.data.go.kr/data/15059029/openapi.do → **활용신청** (자동승인)
+3. 마이페이지 → 오픈API → 인증키 → **일반 인증키(Decoding)** 복사
+
+### 4-3. Vercel 환경변수 (Settings → Environment Variables, 세 환경 모두 체크)
+| Key | Value |
+|---|---|
+| `SUPABASE_URL` | Supabase Project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service_role key |
+| `DATA_GO_KR_KEY` | 공공데이터포털 Decoding 키 |
+| `CRON_SECRET` | 아무 길고 랜덤한 문자열 |
+
+입력 후 **Deployments → 최신 배포 → Redeploy** (환경변수 반영).
+
+### 4-4. 첫 수집 & 확인
+1. 오퍼레이션/필드 확인:  `https://120lifehomes.com/api/ingest?mode=probe&secret=<CRON_SECRET>`
+2. 매핑 미리보기:        `https://120lifehomes.com/api/ingest?mode=sample&secret=<CRON_SECRET>`
+   → 필드명이 다르면 Claude 가 `api/ingest.js` 의 `mapRecord()` 수정
+3. 전체 수집:            `https://120lifehomes.com/api/ingest?secret=<CRON_SECRET>`
+4. 확인:                `https://120lifehomes.com/api/facilities?sido=서울`
+5. 그 다음 Claude 가 `search.html` / `facility.html` 를 API 연동으로 전환
 
 ---
 

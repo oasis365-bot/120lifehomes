@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "name": "120lifehomes",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "120 라이프홈즈 — 전국 요양시설 정보·리뷰 포털",
+  "engines": { "node": "20.x" }
+}
