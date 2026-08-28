@@ -54,18 +54,17 @@ export default async function handler(req, res) {
       return;
     }
 
-    const op = await resolveOp(key);
-    if (!op) {
-      res.status(502).json({ error: 'no_working_operation', tried: OP_CANDIDATES });
-      return;
-    }
+    const op = OP;
 
     if (mode === 'sample') {
-      const { items } = await fetchPage(key, op, 1, 3);
+      const { items, json } = await fetchPage(key, op, 1, 3);
       res.status(200).json({
+        base: BASE,
         op,
+        count: items.length,
         rawFirst: items[0] || null,
         mappedFirst: items[0] ? mapRecord(items[0]) : null,
+        headerIfEmpty: items.length ? undefined : json,
         note: '필드명이 예상과 다르면 mapRecord() 를 이 rawFirst 기준으로 수정하세요.',
       });
       return;
