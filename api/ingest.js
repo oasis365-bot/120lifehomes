@@ -57,6 +57,22 @@ export default async function handler(req, res) {
       res.status(200).json(await resolveBase(key));
       return;
     }
+    if (mode === 'count') {
+      const base = BASE;
+      const out = { noFilter: null, bySido: {}, byServiceKind: {} };
+      const nf = parseResponse((await callApi(key, base, 1, 1)).text);
+      out.noFilter = { totalCount: nf.totalCount, resultCode: nf.resultCode };
+      for (const cd of ['11', '26', '41', '44', '52']) {
+        const p = parseResponse((await callApi(key, base, 1, 1, { siDoCd: cd })).text);
+        out.bySido[cd] = p.totalCount;
+      }
+      for (const sk of ['01', '02', '03', '04', '05', '06', '07', '08', '001', '007', '11', '12']) {
+        const p = parseResponse((await callApi(key, base, 1, 1, { serviceKind: sk })).text);
+        if (p.totalCount) out.byServiceKind[sk] = p.totalCount;
+      }
+      res.status(200).json(out);
+      return;
+    }
 
     const base = await resolveBaseUrl(key);
     if (!base) {
@@ -120,10 +136,13 @@ function decodedKey(key) {
   }
 }
 
-async function callApi(key, base, pageNo, numOfRows) {
-  const qs =
+async function callApi(key, base, pageNo, numOfRows, extra = {}) {
+  let qs =
     `serviceKey=${encodeURIComponent(decodedKey(key))}` +
     `&pageNo=${pageNo}&numOfRows=${numOfRows}&_type=json`;
+  for (const [k, v] of Object.entries(extra)) {
+    if (v != null && v !== '') qs += `&${k}=${encodeURIComponent(v)}`;
+  }
   const r = await fetch(`${base}/${OP}?${qs}`);
   const text = await r.text();
   return { status: r.status, text };
