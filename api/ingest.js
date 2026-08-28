@@ -9,15 +9,23 @@
 //         수동 호출은 ?secret=$CRON_SECRET.
 import { haveDb, sb } from '../lib/db.js';
 
-const BASE = 'https://apis.data.go.kr/B550928/searchLtcInsttService01';
+const BASE = process.env.DATA_GO_KR_BASE || 'https://apis.data.go.kr/B550928/searchLtcInsttService01';
 
-// 오퍼레이션 경로가 확실치 않아 후보를 둔다. 확인되면 DATA_GO_KR_OP 로 고정.
+// base + operation 조합 후보. 확인되면 DATA_GO_KR_BASE / DATA_GO_KR_OP 로 고정.
+const BASE_CANDIDATES = [
+  process.env.DATA_GO_KR_BASE,
+  'https://apis.data.go.kr/B550928/searchLtcInsttService01',
+  'https://apis.data.go.kr/B550928/searchLtcInsttService',
+  'https://apis.data.go.kr/B550928/orgInfoService',
+].filter(Boolean);
+
 const OP_CANDIDATES = [
   process.env.DATA_GO_KR_OP,
   'getBillGreentInsttSearchList01',
+  'getBillGreentInsttSearchList',
   'getLtcInsttSearchList',
-  'getLtcInsttSearchList01',
-  'getLtcInsttList',
+  'getEasyBGgList',
+  'getInsttSearchList',
 ].filter(Boolean);
 
 export default async function handler(req, res) {
@@ -41,6 +49,10 @@ export default async function handler(req, res) {
   try {
     if (mode === 'probe') {
       res.status(200).json(await probe(key));
+      return;
+    }
+    if (mode === 'diag') {
+      res.status(200).json(await diag(key));
       return;
     }
 
@@ -105,18 +117,68 @@ export default async function handler(req, res) {
 }
 
 // ── data.go.kr 호출 ──────────────────────────────────────
-async function fetchRaw(key, op, pageNo, numOfRows, extra = {}) {
-  const p = new URLSearchParams({
-    serviceKey: key,
+// serviceKey 는 재인코딩하지 않는다. (Encoding 키는 이미 %2F/%3D 포함,
+//  Decoding 키는 원문. 사용자가 어떤 걸 넣었든 그대로 붙인다 → decoded 우선 사용)
+function decodedKey(key) {
+  try {
+    return key.includes('%') ? decodeURIComponent(key) : key;
+  } catch {
+    return key;
+  }
+}
+async function fetchRaw(key, op, pageNo, numOfRows, extra = {}, base = BASE) {
+  const rest = new URLSearchParams({
     pageNo: String(pageNo),
     numOfRows: String(numOfRows),
     _type: 'json',
     ...extra,
   });
-  const url = `${BASE}/${op}?${p.toString()}`;
+  const url = `${base}/${op}?serviceKey=${encodeURIComponent(decodedKey(key))}&${rest.toString()}`;
   const r = await fetch(url, { headers: { Accept: 'application/json' } });
   const text = await r.text();
   return { httpStatus: r.status, contentType: r.headers.get('content-type'), text, url };
+}
+
+// 모든 base × op 조합을 훑어 에러메시지를 수집한다.
+async function diag(key) {
+  const results = [];
+  for (const base of BASE_CANDIDATES) {
+    for (const op of OP_CANDIDATES) {
+      try {
+        const raw = await fetchRaw(key, op, 1, 2, {}, base);
+        let errMsg = null;
+        let ok = false;
+        let firstKeys = null;
+        try {
+          const j = JSON.parse(raw.text);
+          errMsg =
+            j?.OpenAPI_ServiceResponse?.cmmMsgHeader?.returnAuthMsg ||
+            j?.OpenAPI_ServiceResponse?.cmmMsgHeader?.errMsg ||
+            j?.response?.header?.resultMsg ||
+            null;
+          const item =
+            j?.response?.body?.items?.item ?? j?.response?.body?.items ?? null;
+          const arr = Array.isArray(item) ? item : item ? [item] : [];
+          if (arr[0]) {
+            ok = true;
+            firstKeys = Object.keys(arr[0]);
+          } else if (j?.response?.header?.resultCode === '00') {
+            ok = true;
+          }
+        } catch {
+          errMsg = 'non-JSON: ' + raw.text.slice(0, 120);
+        }
+        results.push({ base: base.split('/B550928/')[1] || base, op, http: raw.httpStatus, ok, errMsg, firstKeys });
+      } catch (e) {
+        results.push({ base, op, error: String(e.message || e).slice(0, 150) });
+      }
+    }
+  }
+  return {
+    keyLooksEncoded: key.includes('%'),
+    keyLen: key.length,
+    results,
+  };
 }
 
 async function fetchPage(key, op, pageNo, numOfRows) {
