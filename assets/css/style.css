@@ -76,9 +76,12 @@ header.site {
   position: sticky; top: 0; z-index: 50;
 }
 header.site .wrap { display: flex; align-items: center; gap: 28px; height: 74px; }
-.logo { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 1.4rem; color: var(--green); }
-.logo svg { width: 34px; height: 34px; }
-.logo small { display: block; font-size: .62rem; color: var(--gray); font-weight: 600; letter-spacing: .04em; }
+.logo { display: flex; align-items: center; gap: 12px; }
+.logo .logo-img { height: 46px; width: auto; display: block; }
+.logo .logo-tag {
+  font-size: .78rem; font-weight: 600; color: var(--gray); line-height: 1.35;
+  letter-spacing: .01em; border-left: 1px solid var(--line); padding-left: 12px;
+}
 
 nav.main { margin-left: auto; }
 nav.main ul { display: flex; align-items: center; gap: 26px; }
@@ -298,6 +301,8 @@ footer.site .disclaimer { border-top: 1px solid #3a444c; margin-top: 30px; paddi
   footer.site .cols { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 560px) {
+  .logo .logo-tag { display: none; }
+  .logo .logo-img { height: 36px; }
   .search-grid { grid-template-columns: 1fr; }
   .type-grid, .collection-grid, .guide-grid, .region-grid { grid-template-columns: 1fr 1fr; }
   .hero h1 { font-size: 1.6rem; }

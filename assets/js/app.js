@@ -33,9 +33,8 @@ function mountChrome(activePage) {
   </div></div>
   <header class="site"><div class="wrap">
     <a href="index.html" class="logo">
-      <!-- 로고: 나중에 직접 만든 이미지로 교체하려면 이 svg 를 <img src="assets/logo.svg" alt="120 라이프홈즈"> 로 바꾸면 됩니다 -->
-      <svg viewBox="0 0 44 44" fill="none" aria-hidden="true"><rect width="44" height="44" rx="10" fill="#1f8a4c"/><path d="M22 9 33 18v15.5A1.5 1.5 0 0 1 31.5 35h-19A1.5 1.5 0 0 1 11 33.5V18l11-9Z" fill="#fff"/><text x="22" y="29.5" font-size="11" font-weight="800" text-anchor="middle" fill="#1f8a4c" font-family="'Noto Sans KR',sans-serif">120</text></svg>
-      <span>120 라이프홈즈<small>전국 요양시설 검색</small></span>
+      <img src="assets/logo.svg" alt="120 LIFE homes" class="logo-img">
+      <span class="logo-tag">전국 요양시설<br>정보 리뷰 포털</span>
     </a>
     <button class="menu-toggle" onclick="toggleMenu()" aria-label="메뉴">☰</button>
     <nav class="main"><ul>

@@ -41,13 +41,13 @@
 
 ## 로고 교체 방법
 
-현재 로고는 `assets/js/app.js` 의 `mountChrome()` 안에 인라인 SVG로 들어 있습니다.
-직접 만든 로고로 바꾸려면:
+로고는 `assets/logo.svg` 파일입니다. 헤더에서 `assets/js/app.js` 의 `mountChrome()` 안
+`<img src="assets/logo.svg" ...>` 로 불러오고, 오른쪽 `<span class="logo-tag">` 이 "전국 요양시설
+정보 리뷰 포털" 부가문구입니다.
 
-1. 로고 파일을 `assets/logo.svg` (또는 `.png`) 로 저장
-2. `app.js` 의 `<!-- 로고: ... -->` 주석 아래 `<svg>...</svg>` 를
-   `<img src="assets/logo.svg" alt="120 라이프홈즈" style="height:34px">` 로 교체
-3. 텍스트 워드마크도 빼려면 그 아래 `<span>120 라이프홈즈<small>...</small></span>` 줄도 삭제
+- **로고 이미지만 교체**: `assets/logo.svg` 를 새 파일로 덮어쓰기 (SVG 권장, PNG면 배경 투명)
+- **크기 조정**: `assets/css/style.css` 의 `.logo .logo-img { height: 46px }`
+- **부가문구 수정/삭제**: `app.js` 의 `<span class="logo-tag">...</span>`
 
 ## 실행 방법
 
