@@ -1,47 +1,49 @@
 // GET /api/ingest — 공공데이터포털 장기요양기관 검색 목록 → Supabase 동기화
 //
-//   모드:
-//     ?mode=resolve  base 후보를 훑어 어떤 조합이 정상응답(resultCode 00)인지 찾기
-//     ?mode=sample   정상 조합으로 3건 가져와 원본/매핑 미리보기
-//     (기본 sync)    전체 페이지 순회하며 upsert
+//   엔드포인트: apis.data.go.kr/B550928/searchLtcInsttService02/getLtcInsttSeachList02
+//   이 오퍼레이션은 필터(siDoCd 등)가 필요 → 17개 시도를 순회하며 수집.
+//   제공 필드: adminNm, adminPttnCd, longTermAdminSym, siDoCd, siGunGuCd,
+//             longTermPeribRgtDt(지정일), stpRptDt(설치신고일)
+//   (주소문자열·전화·정원·평가등급·좌표는 이 API 에 없음 → 상세조회 API 별도 필요)
 //
-//   보호: Vercel Cron 은 Authorization: Bearer $CRON_SECRET. 수동은 ?secret=$CRON_SECRET.
+//   모드: ?mode=sample | ?mode=diag | (기본 sync)
+//   보호: Vercel Cron → Authorization: Bearer $CRON_SECRET, 수동 → ?secret=
 import { haveDb, sb } from '../lib/db.js';
 
-// 확인된 실제 엔드포인트 (data.go.kr 미리보기 URL 기준)
+export const config = { maxDuration: 60 }; // Vercel Hobby 최대
+
 const BASE = process.env.DATA_GO_KR_BASE || 'https://apis.data.go.kr/B550928/searchLtcInsttService02';
-const OP = process.env.DATA_GO_KR_OP || 'getBillGreentInsttSearchList02';
+const OP = process.env.DATA_GO_KR_OP || 'getLtcInsttSeachList02';
 
-// data.go.kr 상세기능에 여러 오퍼레이션이 있음. 전체 목록용을 찾아야 함.
-const OP_CANDIDATES = [
-  process.env.DATA_GO_KR_OP,
-  'getBillGreentInsttSearchList02',
-  'getLtcInsttSeachList02',
-  'getLtcInsttSearchList02',
-  'getEasyBGgSeachList02',
-  'getEasySeachList02',
-].filter(Boolean);
-
-const BASE_CANDIDATES = [
-  process.env.DATA_GO_KR_BASE,
-  'https://apis.data.go.kr/B550928/searchLtcInsttService02',
-  'https://apis.data.go.kr/B550928/searchLtcInsttService01',
-].filter(Boolean);
-
-// 시도 법정동코드(2자리) → 이름
+// 17개 시도 법정동 코드
+const SIDO_CODES = ['11', '26', '27', '28', '29', '30', '31', '36', '41', '43', '44', '45', '46', '47', '48', '50', '51'];
 const SIDO = {
   '11': '서울', '26': '부산', '27': '대구', '28': '인천', '29': '광주', '30': '대전',
-  '31': '울산', '36': '세종', '41': '경기', '42': '강원', '51': '강원', '43': '충북',
-  '44': '충남', '45': '전북', '52': '전북', '46': '전남', '47': '경북', '48': '경남', '50': '제주',
+  '31': '울산', '36': '세종', '41': '경기', '43': '충북', '44': '충남', '45': '전북',
+  '46': '전남', '47': '경북', '48': '경남', '50': '제주', '51': '강원', '42': '강원', '52': '전북',
 };
 
-// serviceKind(급여종류) 코드 → 라벨 (실측 후 보정). 원본코드는 raw 에 보존.
-const SERVICE_KIND = {
-  '01': '주야간보호', '02': '단기보호', '03': '방문요양', '04': '방문목욕', '05': '방문간호',
-  '06': '복지용구', '07': '노인요양시설', '08': '노인요양공동생활가정',
-  '001': '주야간보호', '002': '단기보호', '003': '방문요양', '004': '방문목욕', '005': '방문간호',
-  '006': '복지용구', '007': '노인요양시설', '008': '노인요양공동생활가정',
+// 기관구분코드(adminPttnCd) → 라벨 (추정, raw 에 원본 보존)
+const ADMIN_PTTN = {
+  A01: '노인요양시설', A02: '노인요양시설', A03: '노인요양시설', A04: '노인요양공동생활가정', A05: '노인요양공동생활가정',
+  B01: '방문요양', B02: '방문목욕', B03: '방문간호', B04: '주야간보호', B05: '단기보호', B06: '복지용구',
 };
+
+// 기관명 키워드로 유형 보강
+function typeFromName(name) {
+  const n = name || '';
+  if (/요양병원/.test(n)) return '요양병원';
+  if (/공동생활가정|그룹홈/.test(n)) return '노인요양공동생활가정';
+  if (/주야간|데이케어|주간보호/.test(n)) return '주야간보호';
+  if (/단기보호/.test(n)) return '단기보호';
+  if (/방문목욕/.test(n)) return '방문목욕';
+  if (/방문간호/.test(n)) return '방문간호';
+  if (/방문요양|재가/.test(n)) return '방문요양';
+  if (/실버타운|노인복지주택/.test(n)) return '노인복지주택';
+  if (/양로/.test(n)) return '양로시설';
+  if (/요양원|요양시설|노인요양/.test(n)) return '노인요양시설';
+  return null;
+}
 
 export default async function handler(req, res) {
   const secret = process.env.CRON_SECRET;
@@ -63,122 +65,74 @@ export default async function handler(req, res) {
   const mode = (req.query && req.query.mode) || 'sync';
 
   try {
-    if (mode === 'resolve') {
-      res.status(200).json(await resolveBase(key));
-      return;
-    }
-    if (mode === 'ft') {
-      const base = 'https://apis.data.go.kr/B550928/searchLtcInsttService02';
-      const tests = [
-        ['getLtcInsttSeachList02', { siDoCd: '11' }],
-        ['getLtcInsttSeachList02', { siDoCd: '11', siGunGuCd: '680' }],
-        ['getLtcInsttSeachList02', { serviceKind: '01' }],
-        ['getLtcInsttSeachList02', { serviceKind: '05' }],
-        ['getBillGreentInsttSearchList02', { siDoCd: '11' }],
-      ];
-      const out = [];
-      for (const [op, extra] of tests) {
-        const p = parseResponse((await callApi(key, base, 1, 3, extra, op)).text);
-        out.push({
-          op,
-          extra,
-          resultCode: p.resultCode,
-          totalCount: p.totalCount,
-          firstKeys: p.items[0] ? Object.keys(p.items[0]) : null,
-          first: p.items[0] || null,
-        });
+    if (mode === 'diag') {
+      const out = {};
+      for (const cd of ['11', '41', '48']) {
+        const p = parseResponse((await callApi(key, 1, 2, { siDoCd: cd })).text);
+        out[cd] = { total: p.totalCount, first: p.items[0] || null };
       }
-      res.status(200).json(out);
-      return;
-    }
-    if (mode === 'ops') {
-      const out = [];
-      for (const base of BASE_CANDIDATES) {
-        for (const op of OP_CANDIDATES) {
-          try {
-            const { status, text } = await callApi(key, base, 1, 2, {}, op);
-            const p = parseResponse(text);
-            out.push({
-              base: base.split('/B550928/')[1],
-              op,
-              http: status,
-              resultCode: p.resultCode,
-              resultMsg: p.resultMsg,
-              totalCount: p.totalCount,
-              firstKeys: p.items[0] ? Object.keys(p.items[0]) : null,
-            });
-          } catch (e) {
-            out.push({ base, op, error: String(e.message || e).slice(0, 150) });
-          }
-        }
-      }
-      res.status(200).json({ candidates: out });
-      return;
-    }
-    if (mode === 'count') {
-      const base = BASE;
-      const out = { noFilter: null, bySido: {}, byServiceKind: {} };
-      const nf = parseResponse((await callApi(key, base, 1, 1)).text);
-      out.noFilter = { totalCount: nf.totalCount, resultCode: nf.resultCode };
-      for (const cd of ['11', '26', '41', '44', '52']) {
-        const p = parseResponse((await callApi(key, base, 1, 1, { siDoCd: cd })).text);
-        out.bySido[cd] = p.totalCount;
-      }
-      for (const sk of ['01', '02', '03', '04', '05', '06', '07', '08', '001', '007', '11', '12']) {
-        const p = parseResponse((await callApi(key, base, 1, 1, { serviceKind: sk })).text);
-        if (p.totalCount) out.byServiceKind[sk] = p.totalCount;
-      }
-      res.status(200).json(out);
-      return;
-    }
-
-    const base = await resolveBaseUrl(key);
-    if (!base) {
-      res.status(502).json({ error: 'no_working_base', tried: BASE_CANDIDATES });
+      res.status(200).json({ base: BASE, op: OP, out });
       return;
     }
 
     if (mode === 'sample') {
-      const { items, totalCount } = await fetchPage(key, base, 1, 3);
+      const p = parseResponse((await callApi(key, 1, 3, { siDoCd: '11' })).text);
       res.status(200).json({
-        base,
-        op: OP,
-        totalCount,
-        count: items.length,
-        rawFirst: items[0] || null,
-        mappedFirst: items[0] ? mapRecord(items[0]) : null,
+        totalCount: p.totalCount,
+        rawFirst: p.items[0] || null,
+        mappedFirst: p.items[0] ? mapRecord(p.items[0]) : null,
       });
       return;
     }
 
-    // ── 전체 동기화 ──────────────────────────────────────
+    // ── 전체 동기화 (시도별 순회) ─────────────────────────
     if (!haveDb()) {
       res.status(503).json({ error: 'db_not_configured' });
       return;
     }
-    const size = 500;
-    let page = 1;
-    let total = 0;
-    let upserted = 0;
     const started = Date.now();
-    while (page <= 200) {
-      const { items, totalCount } = await fetchPage(key, base, page, size);
-      if (page === 1) total = totalCount;
-      if (!items.length) break;
-      const rows = dedupe(items.map(mapRecord).filter((r) => r.id && r.name));
-      if (rows.length) {
-        await sb('facilities', {
-          method: 'POST',
-          body: rows,
-          prefer: 'resolution=merge-duplicates,return=minimal',
-        });
-        upserted += rows.length;
+    const size = 500;
+    const perSido = {};
+    let upserted = 0;
+    let calls = 0;
+    const onlySido = req.query && req.query.sido; // 부분 동기화용
+
+    for (const cd of onlySido ? [onlySido] : SIDO_CODES) {
+      let page = 1;
+      let sidoTotal = 0;
+      while (page <= 40) {
+        const { text } = await callApi(key, page, size, { siDoCd: cd });
+        calls += 1;
+        const p = parseResponse(text);
+        if (p.resultCode && p.resultCode !== '00') {
+          throw new Error(`시도 ${cd} p${page}: ${p.resultCode} ${p.resultMsg}`);
+        }
+        if (page === 1) sidoTotal = p.totalCount;
+        if (!p.items.length) break;
+        const rows = dedupe(p.items.map((r) => mapRecord(r, cd)).filter((r) => r.id && r.name));
+        if (rows.length) {
+          await sb('facilities', {
+            method: 'POST',
+            body: rows,
+            prefer: 'resolution=merge-duplicates,return=minimal',
+          });
+          upserted += rows.length;
+        }
+        if (p.items.length < size) break;
+        page += 1;
+        await sleep(120);
       }
-      if (items.length < size) break;
-      page += 1;
-      await sleep(120);
+      perSido[cd] = sidoTotal;
+      await sleep(150);
     }
-    res.status(200).json({ ok: true, base, totalCount: total, pages: page, upserted, elapsedMs: Date.now() - started });
+
+    res.status(200).json({
+      ok: true,
+      calls,
+      upserted,
+      perSido,
+      elapsedMs: Date.now() - started,
+    });
   } catch (e) {
     console.error('[ingest]', e);
     res.status(500).json({ error: 'ingest_failed', detail: String(e.message || e).slice(0, 400) });
@@ -194,21 +148,19 @@ function decodedKey(key) {
   }
 }
 
-async function callApi(key, base, pageNo, numOfRows, extra = {}, op = OP) {
+async function callApi(key, pageNo, numOfRows, extra = {}) {
   let qs =
     `serviceKey=${encodeURIComponent(decodedKey(key))}` +
     `&pageNo=${pageNo}&numOfRows=${numOfRows}&_type=json`;
   for (const [k, v] of Object.entries(extra)) {
     if (v != null && v !== '') qs += `&${k}=${encodeURIComponent(v)}`;
   }
-  const r = await fetch(`${base}/${op}?${qs}`);
+  const r = await fetch(`${BASE}/${OP}?${qs}`);
   const text = await r.text();
   return { status: r.status, text };
 }
 
-// 응답이 JSON 이든 XML 이든 { items, totalCount, resultCode } 로 정규화
 function parseResponse(text) {
-  // JSON 시도
   try {
     const j = JSON.parse(text);
     const err = j?.OpenAPI_ServiceResponse?.cmmMsgHeader;
@@ -241,71 +193,20 @@ function parseResponse(text) {
   return { resultCode, resultMsg, items, totalCount };
 }
 
-async function fetchPage(key, base, pageNo, numOfRows) {
-  const { status, text } = await callApi(key, base, pageNo, numOfRows);
-  const parsed = parseResponse(text);
-  if (parsed.resultCode && parsed.resultCode !== '00') {
-    throw new Error(`data.go.kr ${parsed.resultCode} ${parsed.resultMsg || ''} (http ${status})`);
-  }
-  return parsed;
-}
-
-let _base = null;
-async function resolveBaseUrl(key) {
-  if (_base) return _base;
-  for (const base of BASE_CANDIDATES) {
-    try {
-      const { text } = await callApi(key, base, 1, 1);
-      const p = parseResponse(text);
-      if ((p.resultCode === '00' || p.items.length) && !/NO_OPENAPI_SERVICE/.test(text)) {
-        _base = base;
-        return base;
-      }
-    } catch {
-      /* 다음 */
-    }
-  }
-  return null;
-}
-
-async function resolveBase(key) {
-  const out = [];
-  for (const base of BASE_CANDIDATES) {
-    try {
-      const { status, text } = await callApi(key, base, 1, 2);
-      const p = parseResponse(text);
-      out.push({
-        base,
-        http: status,
-        resultCode: p.resultCode,
-        resultMsg: p.resultMsg,
-        totalCount: p.totalCount,
-        firstKeys: p.items[0] ? Object.keys(p.items[0]) : null,
-        first: p.items[0] || null,
-      });
-    } catch (e) {
-      out.push({ base, error: String(e.message || e).slice(0, 200) });
-    }
-  }
-  return { op: OP, candidates: out };
-}
-
-// ── 레코드 매핑 (실측: adminNm, longTermAdminSym, serviceKind, siDoCd, siGunGuCd, locTelNo_1~3, hmPostNo) ──
-function mapRecord(r) {
-  const sidoCd = str(r.siDoCd);
+// ── 레코드 매핑 ──────────────────────────────────────────
+function mapRecord(r, sidoCdHint) {
+  const sidoCd = str(r.siDoCd) || sidoCdHint || null;
   const sggCd = str(r.siGunGuCd);
-  const tel = [r.locTelNo_1, r.locTelNo_2, r.locTelNo_3].map(str).filter(Boolean);
-  const kind = str(r.serviceKind);
+  const name = str(r.adminNm) || str(r.longTermAdminNm);
+  const pttn = str(r.adminPttnCd);
   return {
     id: str(r.longTermAdminSym) || str(r.ltcAdminSym),
-    name: str(r.adminNm) || str(r.longTermAdminNm),
-    type_code: kind,
-    type_label: (kind && SERVICE_KIND[kind]) || null,
+    name,
+    type_code: pttn,
+    type_label: (pttn && ADMIN_PTTN[pttn]) || typeFromName(name),
     sido: (sidoCd && SIDO[sidoCd]) || sidoCd || null,
-    sigungu: sidoCd && sggCd ? `${sidoCd}${sggCd}` : sggCd || null,
-    address: null, // 목록 API 에는 주소 문자열 없음 (상세조회 API 필요)
-    road_address: null,
-    phone: tel.length === 3 ? tel.join('-') : tel.join('') || null,
+    sigungu: sidoCd && sggCd ? `${sidoCd}${sggCd.padStart(3, '0')}` : sggCd || null,
+    established_at: dateOf(r.longTermPeribRgtDt),
     raw: r,
     synced_at: new Date().toISOString(),
   };
@@ -319,6 +220,11 @@ function str(v) {
   if (v == null) return null;
   const s = String(v).trim();
   return s === '' ? null : s;
+}
+function dateOf(v) {
+  const s = String(v ?? '').replace(/[^\d]/g, '');
+  if (s.length !== 8) return null;
+  return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
 }
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
