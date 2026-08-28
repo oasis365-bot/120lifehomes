@@ -8,15 +8,14 @@
 //   보호: Vercel Cron 은 Authorization: Bearer $CRON_SECRET. 수동은 ?secret=$CRON_SECRET.
 import { haveDb, sb } from '../lib/db.js';
 
-// 확인된 오퍼레이션 (data.go.kr 활용신청 상세기능): "Seach" 오타 주의, 접미사 02
-const OP = process.env.DATA_GO_KR_OP || 'getLtcInsttSeachList02';
+// 확인된 실제 엔드포인트 (data.go.kr 미리보기 URL 기준)
+const BASE = process.env.DATA_GO_KR_BASE || 'https://apis.data.go.kr/B550928/searchLtcInsttService02';
+const OP = process.env.DATA_GO_KR_OP || 'getBillGreentInsttSearchList02';
 
 const BASE_CANDIDATES = [
   process.env.DATA_GO_KR_BASE,
+  'https://apis.data.go.kr/B550928/searchLtcInsttService02',
   'https://apis.data.go.kr/B550928/searchLtcInsttService01',
-  'https://apis.data.go.kr/B550928/searchLtcInsttService',
-  'https://apis.data.go.kr/B550928/getLtcSearchService',
-  'https://apis.data.go.kr/B550928/getLtcInsttService',
 ].filter(Boolean);
 
 // 시도 법정동코드(2자리) → 이름
