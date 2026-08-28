@@ -1,37 +1,46 @@
-// GET /api/ingest — 공공데이터포털 장기요양기관 데이터 → Supabase 동기화
+// GET /api/ingest — 공공데이터포털 장기요양기관 검색 목록 → Supabase 동기화
 //
 //   모드:
-//     ?mode=probe   후보 오퍼레이션들을 1건씩 호출해 어떤 게 응답하는지 + 원본 필드명 확인
-//     ?mode=sample  정상 오퍼레이션으로 3건 가져와 매핑 결과 미리보기
-//     (기본)        전체 페이지 순회하며 upsert
+//     ?mode=resolve  base 후보를 훑어 어떤 조합이 정상응답(resultCode 00)인지 찾기
+//     ?mode=sample   정상 조합으로 3건 가져와 원본/매핑 미리보기
+//     (기본 sync)    전체 페이지 순회하며 upsert
 //
-//   보호: Vercel Cron 은 자동으로 Authorization: Bearer $CRON_SECRET 를 보냄.
-//         수동 호출은 ?secret=$CRON_SECRET.
+//   보호: Vercel Cron 은 Authorization: Bearer $CRON_SECRET. 수동은 ?secret=$CRON_SECRET.
 import { haveDb, sb } from '../lib/db.js';
 
-// 진단 결과: 이 경로만 "등록되지 않은 서비스키"(=경로는 존재) 응답.
-const BASE = process.env.DATA_GO_KR_BASE || 'https://apis.data.go.kr/B550928/searchLtcInsttService';
-const OP = process.env.DATA_GO_KR_OP || 'getBillGreentInsttSearchList';
+// 확인된 오퍼레이션 (data.go.kr 활용신청 상세기능): "Seach" 오타 주의, 접미사 02
+const OP = process.env.DATA_GO_KR_OP || 'getLtcInsttSeachList02';
 
 const BASE_CANDIDATES = [
   process.env.DATA_GO_KR_BASE,
-  'https://apis.data.go.kr/B550928/searchLtcInsttService',
   'https://apis.data.go.kr/B550928/searchLtcInsttService01',
+  'https://apis.data.go.kr/B550928/searchLtcInsttService',
+  'https://apis.data.go.kr/B550928/getLtcSearchService',
+  'https://apis.data.go.kr/B550928/getLtcInsttService',
 ].filter(Boolean);
 
-const OP_CANDIDATES = [
-  process.env.DATA_GO_KR_OP,
-  'getBillGreentInsttSearchList',
-  'getBillGreentInsttSearchList01',
-  'getLtcInsttSearchList',
-].filter(Boolean);
+// 시도 법정동코드(2자리) → 이름
+const SIDO = {
+  '11': '서울', '26': '부산', '27': '대구', '28': '인천', '29': '광주', '30': '대전',
+  '31': '울산', '36': '세종', '41': '경기', '42': '강원', '51': '강원', '43': '충북',
+  '44': '충남', '45': '전북', '52': '전북', '46': '전남', '47': '경북', '48': '경남', '50': '제주',
+};
+
+// serviceKind(급여종류) 코드 → 라벨 (실측 후 보정). 원본코드는 raw 에 보존.
+const SERVICE_KIND = {
+  '01': '주야간보호', '02': '단기보호', '03': '방문요양', '04': '방문목욕', '05': '방문간호',
+  '06': '복지용구', '07': '노인요양시설', '08': '노인요양공동생활가정',
+  '001': '주야간보호', '002': '단기보호', '003': '방문요양', '004': '방문목욕', '005': '방문간호',
+  '006': '복지용구', '007': '노인요양시설', '008': '노인요양공동생활가정',
+};
 
 export default async function handler(req, res) {
-  // ── 인증 ───────────────────────────────────────────────
   const secret = process.env.CRON_SECRET;
-  const auth = req.headers.authorization === `Bearer ${secret}`;
-  const viaQuery = req.query && req.query.secret && req.query.secret === secret;
-  if (secret && !auth && !viaQuery) {
+  const authed =
+    !secret ||
+    req.headers.authorization === `Bearer ${secret}` ||
+    (req.query && req.query.secret === secret);
+  if (!authed) {
     res.status(401).json({ error: 'unauthorized' });
     return;
   }
@@ -45,32 +54,31 @@ export default async function handler(req, res) {
   const mode = (req.query && req.query.mode) || 'sync';
 
   try {
-    if (mode === 'probe') {
-      res.status(200).json(await probe(key));
-      return;
-    }
-    if (mode === 'diag') {
-      res.status(200).json(await diag(key));
+    if (mode === 'resolve') {
+      res.status(200).json(await resolveBase(key));
       return;
     }
 
-    const op = OP;
+    const base = await resolveBaseUrl(key);
+    if (!base) {
+      res.status(502).json({ error: 'no_working_base', tried: BASE_CANDIDATES });
+      return;
+    }
 
     if (mode === 'sample') {
-      const { items, json } = await fetchPage(key, op, 1, 3);
+      const { items, totalCount } = await fetchPage(key, base, 1, 3);
       res.status(200).json({
-        base: BASE,
-        op,
+        base,
+        op: OP,
+        totalCount,
         count: items.length,
         rawFirst: items[0] || null,
         mappedFirst: items[0] ? mapRecord(items[0]) : null,
-        headerIfEmpty: items.length ? undefined : json,
-        note: '필드명이 예상과 다르면 mapRecord() 를 이 rawFirst 기준으로 수정하세요.',
       });
       return;
     }
 
-    // ── 전체 동기화 ─────────────────────────────────────
+    // ── 전체 동기화 ──────────────────────────────────────
     if (!haveDb()) {
       res.status(503).json({ error: 'db_not_configured' });
       return;
@@ -80,12 +88,11 @@ export default async function handler(req, res) {
     let total = 0;
     let upserted = 0;
     const started = Date.now();
-    // 안전장치: 최대 120페이지(6만건)
-    while (page <= 120) {
-      const { items, totalCount } = await fetchPage(key, op, page, size);
+    while (page <= 200) {
+      const { items, totalCount } = await fetchPage(key, base, page, size);
       if (page === 1) total = totalCount;
       if (!items.length) break;
-      const rows = items.map(mapRecord).filter((r) => r.id && r.name);
+      const rows = dedupe(items.map(mapRecord).filter((r) => r.id && r.name));
       if (rows.length) {
         await sb('facilities', {
           method: 'POST',
@@ -96,26 +103,16 @@ export default async function handler(req, res) {
       }
       if (items.length < size) break;
       page += 1;
-      // 서버 부담 완화
-      await sleep(150);
+      await sleep(120);
     }
-    res.status(200).json({
-      ok: true,
-      op,
-      totalCount: total,
-      pages: page,
-      upserted,
-      elapsedMs: Date.now() - started,
-    });
+    res.status(200).json({ ok: true, base, totalCount: total, pages: page, upserted, elapsedMs: Date.now() - started });
   } catch (e) {
     console.error('[ingest]', e);
-    res.status(500).json({ error: 'ingest_failed', detail: String(e.message || e) });
+    res.status(500).json({ error: 'ingest_failed', detail: String(e.message || e).slice(0, 400) });
   }
 }
 
 // ── data.go.kr 호출 ──────────────────────────────────────
-// serviceKey 는 재인코딩하지 않는다. (Encoding 키는 이미 %2F/%3D 포함,
-//  Decoding 키는 원문. 사용자가 어떤 걸 넣었든 그대로 붙인다 → decoded 우선 사용)
 function decodedKey(key) {
   try {
     return key.includes('%') ? decodeURIComponent(key) : key;
@@ -123,196 +120,129 @@ function decodedKey(key) {
     return key;
   }
 }
-async function fetchRaw(key, op, pageNo, numOfRows, extra = {}, base = BASE) {
-  const rest = new URLSearchParams({
-    pageNo: String(pageNo),
-    numOfRows: String(numOfRows),
-    _type: 'json',
-    ...extra,
-  });
-  const url = `${base}/${op}?serviceKey=${encodeURIComponent(decodedKey(key))}&${rest.toString()}`;
-  const r = await fetch(url, { headers: { Accept: 'application/json' } });
+
+async function callApi(key, base, pageNo, numOfRows) {
+  const qs =
+    `serviceKey=${encodeURIComponent(decodedKey(key))}` +
+    `&pageNo=${pageNo}&numOfRows=${numOfRows}&_type=json`;
+  const r = await fetch(`${base}/${OP}?${qs}`);
   const text = await r.text();
-  return { httpStatus: r.status, contentType: r.headers.get('content-type'), text, url };
+  return { status: r.status, text };
 }
 
-// 알려진 경로에 대해 serviceKey 형태를 바꿔가며 테스트
-async function keyVariants(key) {
-  const base = 'https://apis.data.go.kr/B550928/searchLtcInsttService';
-  const op = 'getBillGreentInsttSearchList';
-  let decodedOnce = key;
-  try { decodedOnce = key.includes('%') ? decodeURIComponent(key) : key; } catch {}
-  const variants = {
-    'raw(as-stored)': key,
-    'encodeURIComponent(raw)': encodeURIComponent(key),
-    'decodedOnce': decodedOnce,
-    'encodeURIComponent(decodedOnce)': encodeURIComponent(decodedOnce),
-  };
-  const out = {};
-  for (const [label, sk] of Object.entries(variants)) {
-    try {
-      const url = `${base}/${op}?serviceKey=${sk}&pageNo=1&numOfRows=2&_type=json`;
-      const r = await fetch(url);
-      const t = await r.text();
-      out[label] = { http: r.status, head: t.slice(0, 220) };
-    } catch (e) {
-      out[label] = { error: String(e.message || e).slice(0, 150) };
-    }
-  }
-  return out;
-}
-
-// 모든 base × op 조합을 훑어 에러메시지를 수집한다.
-async function diag(key) {
-  const results = [];
-  const keyTest = await keyVariants(key);
-  for (const base of BASE_CANDIDATES) {
-    for (const op of OP_CANDIDATES) {
-      try {
-        const raw = await fetchRaw(key, op, 1, 2, {}, base);
-        let errMsg = null;
-        let ok = false;
-        let firstKeys = null;
-        try {
-          const j = JSON.parse(raw.text);
-          errMsg =
-            j?.OpenAPI_ServiceResponse?.cmmMsgHeader?.returnAuthMsg ||
-            j?.OpenAPI_ServiceResponse?.cmmMsgHeader?.errMsg ||
-            j?.response?.header?.resultMsg ||
-            null;
-          const item =
-            j?.response?.body?.items?.item ?? j?.response?.body?.items ?? null;
-          const arr = Array.isArray(item) ? item : item ? [item] : [];
-          if (arr[0]) {
-            ok = true;
-            firstKeys = Object.keys(arr[0]);
-          } else if (j?.response?.header?.resultCode === '00') {
-            ok = true;
-          }
-        } catch {
-          errMsg = 'non-JSON: ' + raw.text.slice(0, 120);
-        }
-        results.push({ base: base.split('/B550928/')[1] || base, op, http: raw.httpStatus, ok, errMsg, firstKeys });
-      } catch (e) {
-        results.push({ base, op, error: String(e.message || e).slice(0, 150) });
-      }
-    }
-  }
-  return {
-    keyLooksEncoded: key.includes('%'),
-    keyLen: key.length,
-    keyTest,
-    results,
-  };
-}
-
-async function fetchPage(key, op, pageNo, numOfRows) {
-  const { httpStatus, text } = await fetchRaw(key, op, pageNo, numOfRows);
-  let json;
+// 응답이 JSON 이든 XML 이든 { items, totalCount, resultCode } 로 정규화
+function parseResponse(text) {
+  // JSON 시도
   try {
-    json = JSON.parse(text);
+    const j = JSON.parse(text);
+    const err = j?.OpenAPI_ServiceResponse?.cmmMsgHeader;
+    if (err) return { resultCode: err.returnReasonCode, resultMsg: err.returnAuthMsg, items: [], totalCount: 0 };
+    const body = j?.response?.body ?? {};
+    let item = body?.items?.item ?? body?.items ?? [];
+    if (!Array.isArray(item)) item = item ? [item] : [];
+    return {
+      resultCode: j?.response?.header?.resultCode ?? '00',
+      resultMsg: j?.response?.header?.resultMsg,
+      items: item,
+      totalCount: Number(body.totalCount) || 0,
+    };
   } catch {
-    throw new Error(`JSON 파싱 실패 (op=${op}, http=${httpStatus}): ${text.slice(0, 300)}`);
+    /* XML */
   }
-  const body = json?.response?.body ?? json?.body ?? {};
-  let item = body?.items?.item ?? body?.items ?? body?.item ?? [];
-  if (!Array.isArray(item)) item = item ? [item] : [];
-  const header = json?.response?.header ?? json?.header ?? null;
-  return { items: item, totalCount: Number(body.totalCount) || 0, header, json };
+  const resultCode = (text.match(/<resultCode>([^<]*)<\/resultCode>/) || [])[1];
+  const resultMsg = (text.match(/<resultMsg>([^<]*)<\/resultMsg>/) || [])[1];
+  const totalCount = Number((text.match(/<totalCount>([^<]*)<\/totalCount>/) || [])[1]) || 0;
+  const items = [];
+  const itemRe = /<item>([\s\S]*?)<\/item>/g;
+  let m;
+  while ((m = itemRe.exec(text))) {
+    const obj = {};
+    const fieldRe = /<([A-Za-z0-9_]+)>([^<]*)<\/\1>/g;
+    let f;
+    while ((f = fieldRe.exec(m[1]))) obj[f[1]] = f[2];
+    items.push(obj);
+  }
+  return { resultCode, resultMsg, items, totalCount };
 }
 
-async function probe(key) {
-  const out = [];
-  for (const op of OP_CANDIDATES) {
-    try {
-      const raw = await fetchRaw(key, op, 1, 3);
-      let parsed = null;
-      let topKeys = null;
-      try {
-        parsed = JSON.parse(raw.text);
-        topKeys = Object.keys(parsed);
-      } catch {
-        /* XML 등 */
-      }
-      out.push({
-        op,
-        url: raw.url.replace(key, 'KEY'),
-        httpStatus: raw.httpStatus,
-        contentType: raw.contentType,
-        topKeys,
-        header: parsed?.response?.header ?? parsed?.header ?? null,
-        bodyKeys: parsed?.response?.body ? Object.keys(parsed.response.body) : null,
-        rawHead: raw.text.slice(0, 900),
-      });
-    } catch (e) {
-      out.push({ op, ok: false, error: String(e.message || e).slice(0, 300) });
-    }
+async function fetchPage(key, base, pageNo, numOfRows) {
+  const { status, text } = await callApi(key, base, pageNo, numOfRows);
+  const parsed = parseResponse(text);
+  if (parsed.resultCode && parsed.resultCode !== '00') {
+    throw new Error(`data.go.kr ${parsed.resultCode} ${parsed.resultMsg || ''} (http ${status})`);
   }
-  return { candidates: out };
+  return parsed;
 }
 
-let _op = null;
-async function resolveOp(key) {
-  if (_op) return _op;
-  for (const op of OP_CANDIDATES) {
+let _base = null;
+async function resolveBaseUrl(key) {
+  if (_base) return _base;
+  for (const base of BASE_CANDIDATES) {
     try {
-      const { header } = await fetchPage(key, op, 1, 1);
-      const code = header?.resultCode ?? header?.['resultCode'];
-      if (code === undefined || code === '00' || code === 0) {
-        _op = op;
-        return op;
+      const { text } = await callApi(key, base, 1, 1);
+      const p = parseResponse(text);
+      if ((p.resultCode === '00' || p.items.length) && !/NO_OPENAPI_SERVICE/.test(text)) {
+        _base = base;
+        return base;
       }
     } catch {
-      /* 다음 후보 */
+      /* 다음 */
     }
   }
   return null;
 }
 
-// ── 레코드 매핑 (첫 실사 응답 확인 후 조정 필요) ─────────────
+async function resolveBase(key) {
+  const out = [];
+  for (const base of BASE_CANDIDATES) {
+    try {
+      const { status, text } = await callApi(key, base, 1, 2);
+      const p = parseResponse(text);
+      out.push({
+        base,
+        http: status,
+        resultCode: p.resultCode,
+        resultMsg: p.resultMsg,
+        totalCount: p.totalCount,
+        firstKeys: p.items[0] ? Object.keys(p.items[0]) : null,
+        first: p.items[0] || null,
+      });
+    } catch (e) {
+      out.push({ base, error: String(e.message || e).slice(0, 200) });
+    }
+  }
+  return { op: OP, candidates: out };
+}
+
+// ── 레코드 매핑 (실측: adminNm, longTermAdminSym, serviceKind, siDoCd, siGunGuCd, locTelNo_1~3, hmPostNo) ──
 function mapRecord(r) {
+  const sidoCd = str(r.siDoCd);
+  const sggCd = str(r.siGunGuCd);
+  const tel = [r.locTelNo_1, r.locTelNo_2, r.locTelNo_3].map(str).filter(Boolean);
+  const kind = str(r.serviceKind);
   return {
-    id: pick(r, ['longTermAdminSym', 'ltcAdminSym', 'adminSym', 'ltcInsttCd', 'insttCode']),
-    name: pick(r, ['adminNm', 'longTermAdminNm', 'ltcInsttNm', 'yadmNm', 'bplcNm']),
-    type_code: pick(r, ['ltcClCd', 'admTypeCd', 'salaryKindCd', 'ltcInsttClCd']),
-    type_label: pick(r, ['ltcClNm', 'admTypeNm', 'salaryKindNm', 'ltcInsttClNm']),
-    sido: pick(r, ['siDoNm', 'sidoNm', 'siDoCd']),
-    sigungu: pick(r, ['siGunGuNm', 'sigunguNm', 'siGunGuCd']),
-    address: pick(r, ['lnmAddr', 'lotNoAddr', 'addr', 'address']),
-    road_address: pick(r, ['roadNmAddr', 'rnAddr', 'roadAddr']),
-    lat: num(pick(r, ['la', 'lat', 'yPos', 'yCrdnt'])),
-    lng: num(pick(r, ['lo', 'lng', 'xPos', 'xCrdnt'])),
-    phone: pick(r, ['telNo', 'telno', 'tel', 'phoneNumber']),
-    capacity: int(pick(r, ['totRatedPersonCnt', 'ratedPersonCnt', 'fixNum', 'totPrsnCnt'])),
-    current_count: int(pick(r, ['nowRatedPersonCnt', 'usePersonCnt', 'curNum', 'nowPrsnCnt'])),
-    eval_grade: pick(r, ['evalGrade', 'evalGdCd', 'grade', 'evltGrde']),
-    established_at: dateOf(pick(r, ['desnDate', 'estbDate', 'desnYmd', 'desginDate'])),
+    id: str(r.longTermAdminSym) || str(r.ltcAdminSym),
+    name: str(r.adminNm) || str(r.longTermAdminNm),
+    type_code: kind,
+    type_label: (kind && SERVICE_KIND[kind]) || null,
+    sido: (sidoCd && SIDO[sidoCd]) || sidoCd || null,
+    sigungu: sidoCd && sggCd ? `${sidoCd}${sggCd}` : sggCd || null,
+    address: null, // 목록 API 에는 주소 문자열 없음 (상세조회 API 필요)
+    road_address: null,
+    phone: tel.length === 3 ? tel.join('-') : tel.join('') || null,
     raw: r,
     synced_at: new Date().toISOString(),
   };
 }
 
-function pick(obj, keys) {
-  for (const k of keys) {
-    if (obj[k] !== undefined && obj[k] !== null && String(obj[k]).trim() !== '') return String(obj[k]).trim();
-  }
-  return null;
+function dedupe(rows) {
+  const seen = new Set();
+  return rows.filter((r) => (seen.has(r.id) ? false : seen.add(r.id)));
 }
-function num(v) {
+function str(v) {
   if (v == null) return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-function int(v) {
-  if (v == null) return null;
-  const n = parseInt(String(v).replace(/[^\d-]/g, ''), 10);
-  return Number.isFinite(n) ? n : null;
-}
-function dateOf(v) {
-  if (!v) return null;
-  const s = String(v).replace(/[^\d]/g, '');
-  if (s.length !== 8) return null;
-  return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+  const s = String(v).trim();
+  return s === '' ? null : s;
 }
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
