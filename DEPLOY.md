@@ -1,4 +1,4 @@
-# 배포 가이드 — 케어홈즈
+# 배포 가이드 — 120 라이프홈즈
 
 목표 구성: **GitHub(Private) + Vercel + 독립 도메인 + (이후) Supabase**
 
@@ -27,14 +27,14 @@
 ## 2. GitHub 저장소 만들기 (Private)
 
 1. https://github.com/new
-2. Repository name: `carehomes` (원하는 이름)
+2. Repository name: `120lifehomes` (원하는 이름)
 3. **Private** 선택, 나머지 빈 상태로 `Create repository`
-4. 생성 후 나오는 주소(예: `https://github.com/사용자명/carehomes.git`)를 복사
+4. 생성 후 나오는 주소(예: `https://github.com/사용자명/120lifehomes.git`)를 복사
 
 그 다음 이 폴더에서 (제가 실행하거나, 아래를 직접 실행):
 
 ```bash
-git remote add origin https://github.com/사용자명/carehomes.git
+git remote add origin https://github.com/사용자명/120lifehomes.git
 git push -u origin main
 ```
 
@@ -46,9 +46,9 @@ git push -u origin main
 ## 3. Vercel 연결
 
 1. https://vercel.com/signup → **Continue with GitHub**
-2. `Add New...` → `Project` → 방금 만든 `carehomes` 저장소 `Import`
+2. `Add New...` → `Project` → 방금 만든 `120lifehomes` 저장소 `Import`
 3. Framework Preset: **Other** (지금은 순수 정적) / Root Directory: 그대로
-4. `Deploy` → 1~2분 후 `carehomes.vercel.app` 같은 임시 주소 생성
+4. `Deploy` → 1~2분 후 `120lifehomes.vercel.app` 같은 임시 주소 생성
 
 ### 독립 도메인 연결
 5. 프로젝트 → `Settings` → `Domains` → `120lifehomes.com` 입력 → `Add`

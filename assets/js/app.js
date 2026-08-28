@@ -1,5 +1,5 @@
 /* =========================================================
-   케어홈즈 — 공통 스크립트
+   120 라이프홈즈 — 공통 스크립트
    ========================================================= */
 
 /* ---------- 글자 크기 조절 (접근성) ---------- */
@@ -33,8 +33,9 @@ function mountChrome(activePage) {
   </div></div>
   <header class="site"><div class="wrap">
     <a href="index.html" class="logo">
-      <svg viewBox="0 0 48 48" fill="none"><path d="M24 4 6 18v24a2 2 0 0 0 2 2h32a2 2 0 0 0 2-2V18L24 4Z" fill="#1f8a4c"/><path d="M24 22a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm-9 15c0-5 4-8 9-8s9 3 9 8v2H15v-2Z" fill="#fff"/></svg>
-      <span>케어홈즈<small>전국 요양시설 검색</small></span>
+      <!-- 로고: 나중에 직접 만든 이미지로 교체하려면 이 svg 를 <img src="assets/logo.svg" alt="120 라이프홈즈"> 로 바꾸면 됩니다 -->
+      <svg viewBox="0 0 44 44" fill="none" aria-hidden="true"><rect width="44" height="44" rx="10" fill="#1f8a4c"/><path d="M22 9 33 18v15.5A1.5 1.5 0 0 1 31.5 35h-19A1.5 1.5 0 0 1 11 33.5V18l11-9Z" fill="#fff"/><text x="22" y="29.5" font-size="11" font-weight="800" text-anchor="middle" fill="#1f8a4c" font-family="'Noto Sans KR',sans-serif">120</text></svg>
+      <span>120 라이프홈즈<small>전국 요양시설 검색</small></span>
     </a>
     <button class="menu-toggle" onclick="toggleMenu()" aria-label="메뉴">☰</button>
     <nav class="main"><ul>
@@ -54,7 +55,7 @@ function mountChrome(activePage) {
   <footer class="site"><div class="wrap">
     <div class="cols">
       <div>
-        <h4>케어홈즈</h4>
+        <h4>120 라이프홈즈</h4>
         <p>우리 가족에게 맞는 요양시설을, 전국 어디서나 쉽고 투명하게 찾을 수 있도록 돕는 요양시설 검색 플랫폼입니다.</p>
         <p style="margin-top:10px">고객센터 <strong style="color:#fff">1600-0000</strong> (평일 09:00–18:00)</p>
       </div>
@@ -82,7 +83,7 @@ function mountChrome(activePage) {
       본 사이트는 일본 최대 요양시설 검색 사이트 <em>LIFULL 介護(kaigo.homes.co.jp)</em>의 정보 구조를 참고하여
       한국 노인장기요양보험 제도에 맞게 재구성한 <strong>데모(포트폴리오) 프로젝트</strong>입니다.
       게시된 시설명·주소·연락처·요금·후기는 모두 가상의 예시이며 실제 기관과 무관합니다.<br>
-      © 2026 CareHomes Demo. All rights reserved.
+      © 2026 120lifehomes (120 라이프홈즈). All rights reserved.
     </div>
   </div></footer>`;
 
