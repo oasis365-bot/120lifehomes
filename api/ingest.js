@@ -12,6 +12,16 @@ import { haveDb, sb } from '../lib/db.js';
 const BASE = process.env.DATA_GO_KR_BASE || 'https://apis.data.go.kr/B550928/searchLtcInsttService02';
 const OP = process.env.DATA_GO_KR_OP || 'getBillGreentInsttSearchList02';
 
+// data.go.kr 상세기능에 여러 오퍼레이션이 있음. 전체 목록용을 찾아야 함.
+const OP_CANDIDATES = [
+  process.env.DATA_GO_KR_OP,
+  'getBillGreentInsttSearchList02',
+  'getLtcInsttSeachList02',
+  'getLtcInsttSearchList02',
+  'getEasyBGgSeachList02',
+  'getEasySeachList02',
+].filter(Boolean);
+
 const BASE_CANDIDATES = [
   process.env.DATA_GO_KR_BASE,
   'https://apis.data.go.kr/B550928/searchLtcInsttService02',
@@ -55,6 +65,30 @@ export default async function handler(req, res) {
   try {
     if (mode === 'resolve') {
       res.status(200).json(await resolveBase(key));
+      return;
+    }
+    if (mode === 'ops') {
+      const out = [];
+      for (const base of BASE_CANDIDATES) {
+        for (const op of OP_CANDIDATES) {
+          try {
+            const { status, text } = await callApi(key, base, 1, 2, {}, op);
+            const p = parseResponse(text);
+            out.push({
+              base: base.split('/B550928/')[1],
+              op,
+              http: status,
+              resultCode: p.resultCode,
+              resultMsg: p.resultMsg,
+              totalCount: p.totalCount,
+              firstKeys: p.items[0] ? Object.keys(p.items[0]) : null,
+            });
+          } catch (e) {
+            out.push({ base, op, error: String(e.message || e).slice(0, 150) });
+          }
+        }
+      }
+      res.status(200).json({ candidates: out });
       return;
     }
     if (mode === 'count') {
@@ -136,14 +170,14 @@ function decodedKey(key) {
   }
 }
 
-async function callApi(key, base, pageNo, numOfRows, extra = {}) {
+async function callApi(key, base, pageNo, numOfRows, extra = {}, op = OP) {
   let qs =
     `serviceKey=${encodeURIComponent(decodedKey(key))}` +
     `&pageNo=${pageNo}&numOfRows=${numOfRows}&_type=json`;
   for (const [k, v] of Object.entries(extra)) {
     if (v != null && v !== '') qs += `&${k}=${encodeURIComponent(v)}`;
   }
-  const r = await fetch(`${base}/${OP}?${qs}`);
+  const r = await fetch(`${base}/${op}?${qs}`);
   const text = await r.text();
   return { status: r.status, text };
 }
