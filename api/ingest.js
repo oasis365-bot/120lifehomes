@@ -105,44 +105,60 @@ export default async function handler(req, res) {
 }
 
 // ── data.go.kr 호출 ──────────────────────────────────────
-async function fetchPage(key, op, pageNo, numOfRows) {
+async function fetchRaw(key, op, pageNo, numOfRows, extra = {}) {
   const p = new URLSearchParams({
     serviceKey: key,
     pageNo: String(pageNo),
     numOfRows: String(numOfRows),
     _type: 'json',
+    ...extra,
   });
-  const r = await fetch(`${BASE}/${op}?${p.toString()}`, {
-    headers: { Accept: 'application/json' },
-  });
+  const url = `${BASE}/${op}?${p.toString()}`;
+  const r = await fetch(url, { headers: { Accept: 'application/json' } });
   const text = await r.text();
+  return { httpStatus: r.status, contentType: r.headers.get('content-type'), text, url };
+}
+
+async function fetchPage(key, op, pageNo, numOfRows) {
+  const { httpStatus, text } = await fetchRaw(key, op, pageNo, numOfRows);
   let json;
   try {
     json = JSON.parse(text);
   } catch {
-    throw new Error(`JSON 파싱 실패 (op=${op}, http=${r.status}): ${text.slice(0, 300)}`);
+    throw new Error(`JSON 파싱 실패 (op=${op}, http=${httpStatus}): ${text.slice(0, 300)}`);
   }
-  const body = json?.response?.body ?? {};
-  let item = body?.items?.item ?? body?.items ?? [];
+  const body = json?.response?.body ?? json?.body ?? {};
+  let item = body?.items?.item ?? body?.items ?? body?.item ?? [];
   if (!Array.isArray(item)) item = item ? [item] : [];
-  return { items: item, totalCount: Number(body.totalCount) || 0, header: json?.response?.header };
+  const header = json?.response?.header ?? json?.header ?? null;
+  return { items: item, totalCount: Number(body.totalCount) || 0, header, json };
 }
 
 async function probe(key) {
   const out = [];
   for (const op of OP_CANDIDATES) {
     try {
-      const { items, totalCount, header } = await fetchPage(key, op, 1, 1);
+      const raw = await fetchRaw(key, op, 1, 3);
+      let parsed = null;
+      let topKeys = null;
+      try {
+        parsed = JSON.parse(raw.text);
+        topKeys = Object.keys(parsed);
+      } catch {
+        /* XML 등 */
+      }
       out.push({
         op,
-        ok: true,
-        totalCount,
-        header,
-        sampleKeys: items[0] ? Object.keys(items[0]) : [],
-        sample: items[0] || null,
+        url: raw.url.replace(key, 'KEY'),
+        httpStatus: raw.httpStatus,
+        contentType: raw.contentType,
+        topKeys,
+        header: parsed?.response?.header ?? parsed?.header ?? null,
+        bodyKeys: parsed?.response?.body ? Object.keys(parsed.response.body) : null,
+        rawHead: raw.text.slice(0, 900),
       });
     } catch (e) {
-      out.push({ op, ok: false, error: String(e.message || e).slice(0, 200) });
+      out.push({ op, ok: false, error: String(e.message || e).slice(0, 300) });
     }
   }
   return { candidates: out };
