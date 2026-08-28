@@ -1,0 +1,31 @@
+# 환경변수 / 비밀키 (절대 커밋 금지)
+.env
+.env.*
+!.env.example
+
+# 의존성
+node_modules/
+.pnp
+.pnp.js
+
+# 빌드 산출물
+.next/
+out/
+dist/
+build/
+
+# 로그
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / 에디터
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Vercel
+.vercel

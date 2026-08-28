@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>시설 검색 | 케어홈즈</title>
+<meta name="description" content="지역, 시설 유형, 장기요양등급, 월 이용료, 편의 조건으로 요양시설을 검색합니다.">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body style="font-family:'Noto Sans KR',sans-serif">
+<div id="chrome-header"></div>
+
+<main class="wrap">
+  <div class="breadcrumb"><a href="index.html">홈</a> › 시설 검색</div>
+
+  <div class="search-layout">
+    <aside class="filters">
+      <h3>검색 조건</h3>
+      <form id="filterForm">
+        <div class="filter-group">
+          <label class="grp" for="fRegion">지역</label>
+          <select id="fRegion" name="region" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
+            <option value="">전체 지역</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label class="grp">시설 유형</label>
+          <div id="fTypes"></div>
+        </div>
+
+        <div class="filter-group">
+          <label class="grp" for="fLevel">장기요양등급</label>
+          <select id="fLevel" name="level" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
+            <option value="">등급 무관</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label class="grp" for="fFee">월 이용료 상한</label>
+          <select id="fFee" name="fee" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
+            <option value="">상관없음</option>
+            <option value="50">50만 원 이하</option>
+            <option value="100">100만 원 이하</option>
+            <option value="150">150만 원 이하</option>
+            <option value="200">200만 원 이하</option>
+            <option value="300">300만 원 이하</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label class="grp">편의 · 특징</label>
+          <div id="fFeatures"></div>
+        </div>
+
+        <div class="filter-group">
+          <label class="opt"><input type="checkbox" id="fVacancy"> 공실 있는 곳만 보기</label>
+        </div>
+
+        <button type="button" class="btn btn-green btn-block" onclick="applyFilters()">이 조건으로 검색</button>
+        <button type="button" class="btn btn-ghost btn-block" style="margin-top:8px" onclick="resetFilters()">조건 초기화</button>
+      </form>
+    </aside>
+
+    <section>
+      <div class="results-head">
+        <div class="count">검색 결과 <strong id="count">0</strong>곳</div>
+        <div>
+          <label for="sort" style="font-size:.85rem;color:var(--gray)">정렬</label>
+          <select id="sort" onchange="render()" style="padding:8px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
+            <option value="rating">이용자 평가순</option>
+            <option value="fee-asc">월 이용료 낮은순</option>
+            <option value="fee-desc">월 이용료 높은순</option>
+            <option value="new">최근 개원순</option>
+          </select>
+        </div>
+      </div>
+      <div class="facility-list" id="list"></div>
+      <p id="empty" style="display:none;padding:40px;text-align:center;color:var(--gray)">
+        조건에 맞는 시설이 없습니다. 조건을 완화하거나 <a href="consult.html" style="color:var(--green);font-weight:700">무료 상담</a>을 이용해 보세요.
+      </p>
+    </section>
+  </div>
+</main>
+
+<div id="chrome-footer"></div>
+
+<script src="assets/js/data.js"></script>
+<script src="assets/js/app.js"></script>
+<script>
+  mountChrome("search");
+  const params = qs();
+
+  // 지역
+  const fRegion = document.getElementById("fRegion");
+  REGIONS.forEach(r => fRegion.add(new Option(`${r.name} (${r.count.toLocaleString()})`, r.code)));
+  // 등급
+  const fLevel = document.getElementById("fLevel");
+  CARE_LEVELS.forEach(l => fLevel.add(new Option(l.name, l.code)));
+  // 유형 체크박스
+  document.getElementById("fTypes").innerHTML = FACILITY_TYPES.map(t =>
+    `<label class="opt"><input type="checkbox" name="type" value="${t.code}"> ${t.name}</label>`).join("");
+  // 특징 체크박스
+  document.getElementById("fFeatures").innerHTML = FEATURES.map(f =>
+    `<label class="opt"><input type="checkbox" name="feature" value="${f}"> ${f}</label>`).join("");
+
+  // URL 파라미터 → 폼 반영
+  if (params.region) fRegion.value = params.region;
+  if (params.level) fLevel.value = params.level;
+  if (params.fee) document.getElementById("fFee").value = params.fee;
+  if (params.type) {
+    const cb = document.querySelector(`input[name="type"][value="${params.type}"]`);
+    if (cb) cb.checked = true;
+  }
+  if (params.feature) {
+    const cb = document.querySelector(`input[name="feature"][value="${CSS.escape ? params.feature : params.feature}"]`);
+    document.querySelectorAll('input[name="feature"]').forEach(x => { if (x.value === params.feature) x.checked = true; });
+  }
+
+  function currentFilters() {
+    return {
+      region: fRegion.value,
+      level: fLevel.value,
+      fee: document.getElementById("fFee").value,
+      types: [...document.querySelectorAll('input[name="type"]:checked')].map(x => x.value),
+      features: [...document.querySelectorAll('input[name="feature"]:checked')].map(x => x.value),
+      vacancy: document.getElementById("fVacancy").checked,
+    };
+  }
+
+  function match(f, flt) {
+    if (flt.region && f.region !== flt.region) return false;
+    if (flt.types.length && !flt.types.includes(f.type)) return false;
+    if (flt.level && !f.levels.includes(flt.level)) return false;
+    if (flt.fee && f.monthlyFee > Number(flt.fee)) return false;
+    if (flt.features.length && !flt.features.every(x => f.features.includes(x))) return false;
+    if (flt.vacancy && f.type !== "homecare" && f.vacancy <= 0) return false;
+    return true;
+  }
+
+  function render() {
+    const flt = currentFilters();
+    let rows = FACILITIES.filter(f => match(f, flt));
+    const sort = document.getElementById("sort").value;
+    rows.sort((a, b) => {
+      if (sort === "rating") return b.rating - a.rating;
+      if (sort === "fee-asc") return a.monthlyFee - b.monthlyFee;
+      if (sort === "fee-desc") return b.monthlyFee - a.monthlyFee;
+      if (sort === "new") return Number(b.opened) - Number(a.opened);
+    });
+    document.getElementById("count").textContent = rows.length.toLocaleString();
+    document.getElementById("list").innerHTML = rows.map(facilityCardHTML).join("");
+    document.getElementById("empty").style.display = rows.length ? "none" : "block";
+  }
+
+  function applyFilters() {
+    const flt = currentFilters();
+    const u = new URLSearchParams();
+    if (flt.region) u.set("region", flt.region);
+    if (flt.level) u.set("level", flt.level);
+    if (flt.fee) u.set("fee", flt.fee);
+    if (flt.types[0]) u.set("type", flt.types[0]);
+    if (flt.features[0]) u.set("feature", flt.features[0]);
+    history.replaceState(null, "", "search.html?" + u.toString());
+    render();
+  }
+  function resetFilters() {
+    document.getElementById("filterForm").reset();
+    history.replaceState(null, "", "search.html");
+    render();
+  }
+  window.applyFilters = applyFilters;
+  window.resetFilters = resetFilters;
+  window.render = render;
+
+  render();
+</script>
+</body>
+</html>

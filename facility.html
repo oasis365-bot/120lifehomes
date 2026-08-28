@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>시설 상세 | 케어홈즈</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body style="font-family:'Noto Sans KR',sans-serif">
+<div id="chrome-header"></div>
+
+<main id="detail"></main>
+
+<div id="chrome-footer"></div>
+
+<script src="assets/js/data.js"></script>
+<script src="assets/js/app.js"></script>
+<script>
+  mountChrome("");
+  const id = qs().id;
+  const f = FACILITIES.find(x => x.id === id);
+  const root = document.getElementById("detail");
+
+  if (!f) {
+    root.innerHTML = `<div class="wrap" style="padding:60px 20px;text-align:center">
+      <h1>시설을 찾을 수 없습니다</h1>
+      <p style="margin:12px 0 20px;color:var(--gray)">주소가 잘못되었거나 삭제된 시설입니다.</p>
+      <a href="search.html" class="btn btn-green">시설 검색으로 돌아가기</a></div>`;
+  } else {
+    const isCare = f.type === "daycare" || f.type === "homecare" || f.type === "respite";
+    document.title = `${f.name} | 케어홈즈`;
+    root.innerHTML = `
+    <div class="detail-hero"><div class="wrap">
+      <div class="breadcrumb"><a href="index.html">홈</a> › <a href="search.html?region=${f.region}">${regionName(f.region)}</a> › <a href="search.html?type=${f.type}">${typeName(f.type)}</a> › ${f.name}</div>
+      <div class="type-label">${typeName(f.type)}</div>
+      <h1>${f.name}</h1>
+      <div style="color:var(--gray)">${regionName(f.region)} ${f.city} · ${f.address}</div>
+      <div style="margin-top:8px">
+        <span class="rating">★ ${f.rating.toFixed(1)}</span>
+        <small style="color:var(--gray)">이용자 평가 ${f.reviews}건</small>
+        ${f.vacancy > 0 || f.type === "homecare"
+          ? `<span style="margin-left:12px;background:var(--green-light);color:var(--green-dark);padding:3px 12px;border-radius:999px;font-size:.85rem;font-weight:700">${f.type === "homecare" ? "상시 이용 가능" : "공실 " + f.vacancy + "자리"}</span>`
+          : `<span style="margin-left:12px;background:#eee;color:var(--gray);padding:3px 12px;border-radius:999px;font-size:.85rem;font-weight:700">대기 접수 중</span>`}
+      </div>
+    </div></div>
+
+    <div class="wrap"><div class="detail-grid">
+      <div class="detail-main">
+        <div class="gallery">
+          <div style="background:linear-gradient(135deg,${f.color},${f.color}bb)"></div>
+          <div style="background:${f.color}88"></div>
+          <div style="background:${f.color}66"></div>
+          <div style="background:${f.color}aa"></div>
+          <div style="background:${f.color}55"></div>
+        </div>
+
+        <div class="detail-section">
+          <h2>시설 소개</h2>
+          <p>${f.desc}</p>
+          <div class="tags" style="margin-top:14px">${f.features.map(t => `<span>${t}</span>`).join("")}</div>
+        </div>
+
+        <div class="detail-section">
+          <h2>기본 정보</h2>
+          <table class="spec-table">
+            <tr><th>시설 유형</th><td>${typeName(f.type)}</td></tr>
+            <tr><th>소재지</th><td>${regionName(f.region)} ${f.city} · ${f.address}</td></tr>
+            <tr><th>이용 정원</th><td>${f.capacity === 0 ? "재가 서비스 (정원 없음)" : f.capacity + "명"}</td></tr>
+            <tr><th>개원 연도</th><td>${f.opened}년</td></tr>
+            <tr><th>간호 인력</th><td>${f.nurse24 ? "간호사 24시간 상주" : "간호(조무)사 주간 배치"}</td></tr>
+            <tr><th>입소 가능 등급</th><td>${f.levels.map(levelName).join(", ")}</td></tr>
+            <tr><th>대표 전화</th><td>${f.phone} <span style="color:var(--gray);font-size:.85rem">(데모용 가상 번호)</span></td></tr>
+          </table>
+        </div>
+
+        <div class="detail-section">
+          <h2>비용 안내 (예상)</h2>
+          <table class="spec-table">
+            <tr><th>입소 보증금</th><td>${f.entryFee === 0 ? "없음" : won(f.entryFee)}</td></tr>
+            <tr><th>${isCare ? "월 본인부담금" : "월 이용료"}</th><td><strong style="color:var(--orange-dark)">${won(f.monthlyFee)}</strong> / 월</td></tr>
+            <tr><th>포함 항목</th><td>장기요양보험 본인부담금(급여비의 ${f.type === "homecare" ? "15" : "20"}%), 식재료비, 간식비</td></tr>
+            <tr><th>별도(비급여)</th><td>상급 침실료, 이·미용비, 개인 물품, 진료비 등</td></tr>
+          </table>
+          <p style="font-size:.85rem;color:var(--gray);margin-top:10px">※ 위 금액은 데모용 예시입니다. 실제 비용은 요양등급, 감경 대상 여부, 시설별 비급여 항목에 따라 달라집니다.</p>
+        </div>
+
+        <div class="detail-section">
+          <h2>이용자 평가</h2>
+          <p style="font-size:2rem;font-weight:800;color:var(--orange)">★ ${f.rating.toFixed(1)} <span style="font-size:1rem;color:var(--gray);font-weight:500">/ 5.0 · ${f.reviews}건</span></p>
+          <p style="color:var(--gray);margin-top:6px">"직원분들이 친절하고 어르신을 존중해 주십니다.", "면회 공간이 깨끗하고 식단이 정성스럽습니다." (데모용 예시 후기)</p>
+        </div>
+      </div>
+
+      <aside>
+        <div class="aside-card">
+          <div style="color:var(--gray);font-size:.85rem">${isCare ? "월 본인부담금(예상)" : "월 이용료(예상)"}</div>
+          <div class="fee-big">${won(f.monthlyFee)}<small> / 월</small></div>
+          <ul class="mini">
+            <li><span>입소 보증금</span><strong>${f.entryFee === 0 ? "없음" : won(f.entryFee)}</strong></li>
+            <li><span>공실 현황</span><strong>${f.type === "homecare" ? "상시 가능" : (f.vacancy > 0 ? f.vacancy + "자리" : "대기")}</strong></li>
+            <li><span>이용 정원</span><strong>${f.capacity === 0 ? "재가" : f.capacity + "명"}</strong></li>
+          </ul>
+          <a href="consult.html?facility=${encodeURIComponent(f.name)}" class="btn btn-primary btn-block">견학 · 상담 신청</a>
+          <a href="consult.html" class="btn btn-ghost btn-block" style="margin-top:8px">전화 상담 1600-0000</a>
+          <p style="font-size:.78rem;color:var(--gray);margin-top:12px">신청하시면 케어홈즈 상담원이 공실 확인 후 연락드립니다.</p>
+        </div>
+      </aside>
+    </div></div>
+
+    <div class="wrap" style="padding-bottom:50px">
+      <div class="section-head"><h2>비슷한 시설</h2></div>
+      <div class="facility-list" id="similar"></div>
+    </div>`;
+
+    const similar = FACILITIES.filter(x => x.id !== f.id && (x.type === f.type || x.region === f.region)).slice(0, 3);
+    document.getElementById("similar").innerHTML = similar.map(facilityCardHTML).join("");
+  }
+</script>
+</body>
+</html>

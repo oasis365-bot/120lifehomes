@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>돌봄 가이드 | 케어홈즈</title>
+<meta name="description" content="장기요양등급 신청, 요양시설 종류, 비용과 지원제도, 시설 견학 체크리스트 등 요양 준비에 필요한 정보를 정리했습니다.">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body style="font-family:'Noto Sans KR',sans-serif">
+<div id="chrome-header"></div>
+
+<main>
+  <section class="hero" style="padding-bottom:30px">
+    <div class="wrap">
+      <div class="breadcrumb"><a href="index.html">홈</a> › 돌봄 가이드</div>
+      <h1>요양, <span class="hl">무엇부터</span> 준비해야 할까요?</h1>
+      <p class="lead">장기요양등급 신청부터 시설 선택, 비용 계산까지 — 처음 겪는 가족을 위한 안내입니다.</p>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="wrap">
+      <div class="section-head"><h2>주제별 가이드</h2></div>
+      <div class="guide-grid" id="guideGrid"></div>
+    </div>
+  </section>
+
+  <section class="block alt">
+    <div class="wrap" style="max-width:900px">
+      <div class="section-head"><h2>장기요양등급, 이렇게 신청합니다</h2></div>
+      <ul class="steps">
+        <li><h3>1. 신청</h3><p>국민건강보험공단 지사 방문 또는 온라인·우편·팩스로 '장기요양인정 신청서'를 제출합니다. 만 65세 이상, 또는 65세 미만이면서 노인성 질병(치매·뇌혈관질환 등)이 있는 분이 대상입니다.</p></li>
+        <li><h3>2. 방문 조사</h3><p>공단 직원이 댁을 방문해 신체·인지 기능, 행동 변화, 간호·재활 필요도 등 90개 항목을 조사합니다.</p></li>
+        <li><h3>3. 의사소견서 제출</h3><p>공단이 안내하는 절차에 따라 주치의의 의사소견서를 발급받아 제출합니다.</p></li>
+        <li><h3>4. 등급 판정</h3><p>등급판정위원회가 조사 결과와 소견서를 종합해 1~5등급, 인지지원등급, 또는 등급 외를 판정합니다. 신청일로부터 보통 30일 이내에 결과가 나옵니다.</p></li>
+        <li><h3>5. 서비스 이용</h3><p>'장기요양인정서'와 '개인별 이용계획서'를 받으면 요양원(시설급여)이나 방문요양·주야간보호(재가급여)를 이용할 수 있습니다.</p></li>
+      </ul>
+      <p style="font-size:.85rem;color:var(--gray)">문의: 국민건강보험공단 1577-1000 · 본 내용은 이해를 돕기 위한 요약이며 세부 기준은 변경될 수 있습니다.</p>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="wrap" style="max-width:900px">
+      <div class="section-head"><h2>비용 개념 잡기</h2></div>
+      <table class="spec-table" style="background:#fff;border:1px solid var(--line);border-radius:12px">
+        <tr><th>시설급여</th><td>요양원·그룹홈 입소 시. 급여비용의 <strong>20%</strong>를 본인이 부담하고, 식재료비·간식비는 전액 본인 부담입니다.</td></tr>
+        <tr><th>재가급여</th><td>방문요양·주야간보호·단기보호·복지용구. 급여비용의 <strong>15%</strong>를 본인이 부담합니다(복지용구 15%).</td></tr>
+        <tr><th>본인부담 경감</th><td>의료급여 수급권자, 차상위, 보험료 하위 25~50% 가구는 본인부담금을 <strong>40~60% 경감</strong>받습니다.</td></tr>
+        <tr><th>요양병원</th><td>장기요양보험이 아닌 <strong>건강보험</strong> 적용. 진료비 본인부담 + 간병비(전액 본인)로 구성됩니다.</td></tr>
+        <tr><th>실버타운</th><td>보험 미적용. 보증금 + 월 생활비(관리비·식비·서비스료) 구조로, 시설별 편차가 큽니다.</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="block alt">
+    <div class="wrap" style="max-width:820px">
+      <div class="section-head"><h2>자주 묻는 질문</h2></div>
+      <div id="faqList"></div>
+    </div>
+  </section>
+</main>
+
+<div id="chrome-footer"></div>
+
+<script src="assets/js/data.js"></script>
+<script src="assets/js/app.js"></script>
+<script>
+  mountChrome("guide");
+  document.getElementById("guideGrid").innerHTML = GUIDES.map(g =>
+    `<a class="guide-card" href="#">
+      <div class="ph" style="background:linear-gradient(135deg,${g.color},${g.color}bb)"></div>
+      <div class="txt"><div class="cat">${g.cat}</div><h3>${g.title}</h3><p>${g.desc}</p></div>
+    </a>`).join("");
+  document.getElementById("faqList").innerHTML = FAQS.map(f =>
+    `<details class="faq-item"><summary>${f.q}</summary><div class="ans">${f.a}</div></details>`).join("");
+</script>
+</body>
+</html>

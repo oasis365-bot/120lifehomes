@@ -1,0 +1,305 @@
+/* =========================================================
+   케어홈즈 (CareHomes) — 요양시설 검색 플랫폼
+   일본 kaigo.homes.co.jp 구조를 참고해 한국형으로 재구성
+   ========================================================= */
+
+:root {
+  --green: #1f8a4c;
+  --green-dark: #166b3a;
+  --green-light: #e8f5ec;
+  --orange: #f47b20;
+  --orange-dark: #d9660f;
+  --ink: #23292e;
+  --gray: #5b6670;
+  --line: #e2e6ea;
+  --bg: #f5f7f8;
+  --white: #ffffff;
+  --radius: 12px;
+  --shadow: 0 2px 10px rgba(0, 0, 0, .06);
+  --shadow-lg: 0 8px 28px rgba(0, 0, 0, .12);
+  --fs-base: 17px;
+  --maxw: 1160px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "맑은 고딕",
+    system-ui, -apple-system, sans-serif;
+  font-size: var(--fs-base);
+  line-height: 1.7;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+body.fs-large { --fs-base: 19px; }
+body.fs-xlarge { --fs-base: 22px; }
+
+a { color: inherit; text-decoration: none; }
+img { max-width: 100%; display: block; }
+ul { list-style: none; }
+
+.wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 20px; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 14px 26px; border-radius: 999px; font-weight: 700; font-size: 1rem;
+  border: 2px solid transparent; cursor: pointer; transition: .15s; white-space: nowrap;
+}
+.btn-primary { background: var(--orange); color: #fff; }
+.btn-primary:hover { background: var(--orange-dark); }
+.btn-green { background: var(--green); color: #fff; }
+.btn-green:hover { background: var(--green-dark); }
+.btn-ghost { background: #fff; color: var(--green); border-color: var(--green); }
+.btn-ghost:hover { background: var(--green-light); }
+.btn-lg { padding: 18px 40px; font-size: 1.15rem; }
+.btn-block { width: 100%; }
+
+/* ---------- 접근성 바 ---------- */
+.access-bar {
+  background: var(--ink); color: #cfd6db; font-size: .85rem;
+}
+.access-bar .wrap { display: flex; align-items: center; justify-content: space-between; padding: 6px 20px; }
+.access-bar .fs-controls { display: flex; align-items: center; gap: 8px; }
+.access-bar button {
+  background: #3a444c; color: #fff; border: 0; border-radius: 6px;
+  padding: 4px 10px; cursor: pointer; font-family: inherit;
+}
+.access-bar button:hover { background: var(--green); }
+
+/* ---------- 헤더 ---------- */
+header.site {
+  background: #fff; border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; z-index: 50;
+}
+header.site .wrap { display: flex; align-items: center; gap: 28px; height: 74px; }
+.logo { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 1.4rem; color: var(--green); }
+.logo svg { width: 34px; height: 34px; }
+.logo small { display: block; font-size: .62rem; color: var(--gray); font-weight: 600; letter-spacing: .04em; }
+
+nav.main { margin-left: auto; }
+nav.main ul { display: flex; align-items: center; gap: 26px; }
+nav.main a { font-weight: 700; padding: 8px 0; border-bottom: 3px solid transparent; }
+nav.main a:hover, nav.main a.active { color: var(--green); border-color: var(--green); }
+nav.main .cta { color: #fff; background: var(--orange); padding: 10px 20px; border-radius: 999px; border: 0; }
+nav.main .cta:hover { background: var(--orange-dark); }
+
+.menu-toggle { display: none; background: none; border: 0; font-size: 1.7rem; cursor: pointer; margin-left: auto; }
+
+/* ---------- 히어로 ---------- */
+.hero {
+  background: linear-gradient(180deg, var(--green-light) 0%, #fff 100%);
+  padding: 46px 0 10px;
+}
+.hero h1 { font-size: 2.1rem; line-height: 1.4; }
+.hero h1 .hl { color: var(--green); }
+.hero p.lead { color: var(--gray); margin-top: 10px; font-size: 1.05rem; }
+.hero .stat-row { display: flex; gap: 28px; margin-top: 16px; flex-wrap: wrap; }
+.hero .stat-row div { font-size: .95rem; color: var(--gray); }
+.hero .stat-row strong { display: block; font-size: 1.5rem; color: var(--orange); }
+
+/* ---------- 검색 박스 ---------- */
+.searchbox {
+  background: #fff; border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow-lg); padding: 22px; margin: 22px 0 40px;
+}
+.searchbox h2 { font-size: 1.15rem; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+.search-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.field label { display: block; font-size: .82rem; font-weight: 700; color: var(--gray); margin-bottom: 6px; }
+.field select, .field input {
+  width: 100%; padding: 12px 12px; border: 1px solid var(--line); border-radius: 8px;
+  font-family: inherit; font-size: .98rem; background: #fbfcfc;
+}
+.search-actions { margin-top: 16px; display: flex; gap: 12px; }
+
+.quick-tags { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; }
+.quick-tags span { font-size: .82rem; color: var(--gray); align-self: center; }
+.quick-tags a {
+  font-size: .88rem; background: var(--green-light); color: var(--green-dark);
+  padding: 6px 14px; border-radius: 999px; font-weight: 600;
+}
+.quick-tags a:hover { background: var(--green); color: #fff; }
+
+/* ---------- 섹션 공통 ---------- */
+section.block { padding: 44px 0; }
+section.block.alt { background: #fff; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 22px; flex-wrap: wrap; gap: 8px; }
+.section-head h2 { font-size: 1.5rem; }
+.section-head a.more { color: var(--green); font-weight: 700; font-size: .95rem; }
+
+/* ---------- 지역 그리드 ---------- */
+.region-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+.region-grid a {
+  background: #fff; border: 1px solid var(--line); border-radius: 10px;
+  padding: 16px 10px; text-align: center; font-weight: 700; transition: .12s;
+}
+.region-grid a:hover { border-color: var(--green); background: var(--green-light); transform: translateY(-2px); }
+.region-grid a small { display: block; color: var(--gray); font-weight: 500; font-size: .8rem; margin-top: 2px; }
+
+/* ---------- 유형 카드 ---------- */
+.type-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.type-card {
+  background: #fff; border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 22px; transition: .15s;
+}
+.type-card:hover { box-shadow: var(--shadow-lg); transform: translateY(-3px); }
+.type-card .ico { width: 46px; height: 46px; border-radius: 10px; background: var(--green-light);
+  display: flex; align-items: center; justify-content: center; margin-bottom: 12px; font-size: 1.5rem; }
+.type-card h3 { font-size: 1.12rem; margin-bottom: 6px; }
+.type-card p { font-size: .92rem; color: var(--gray); }
+
+/* ---------- 특집 컬렉션 ---------- */
+.collection-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.collection-card {
+  border-radius: var(--radius); overflow: hidden; color: #fff; position: relative;
+  min-height: 150px; display: flex; flex-direction: column; justify-content: flex-end;
+  padding: 20px; box-shadow: var(--shadow);
+}
+.collection-card::after { content: ""; position: absolute; inset: 0; background: rgba(0,0,0,.28); z-index: 0; }
+.collection-card > * { position: relative; z-index: 1; }
+.collection-card h3 { font-size: 1.2rem; }
+.collection-card p { font-size: .86rem; opacity: .95; }
+
+/* ---------- 시설 카드 ---------- */
+.facility-list { display: grid; gap: 18px; }
+.facility-card {
+  background: #fff; border: 1px solid var(--line); border-radius: var(--radius);
+  overflow: hidden; display: grid; grid-template-columns: 260px 1fr; transition: .15s;
+}
+.facility-card:hover { box-shadow: var(--shadow-lg); }
+.facility-card .thumb { position: relative; min-height: 180px; display: flex; align-items: flex-end; padding: 10px; }
+.facility-card .thumb .badge {
+  background: var(--orange); color: #fff; font-size: .78rem; font-weight: 700;
+  padding: 4px 10px; border-radius: 6px;
+}
+.facility-card .thumb .badge.full { background: var(--gray); }
+.facility-card .body { padding: 18px 20px; }
+.facility-card .body .type-label { color: var(--green); font-weight: 700; font-size: .85rem; }
+.facility-card .body h3 { font-size: 1.25rem; margin: 2px 0 4px; }
+.facility-card .body .addr { color: var(--gray); font-size: .9rem; }
+.facility-card .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.facility-card .tags span {
+  font-size: .8rem; background: var(--green-light); color: var(--green-dark);
+  padding: 3px 10px; border-radius: 999px;
+}
+.facility-card .meta { display: flex; gap: 22px; flex-wrap: wrap; border-top: 1px dashed var(--line); padding-top: 10px; margin-top: 4px; }
+.facility-card .meta div { font-size: .82rem; color: var(--gray); }
+.facility-card .meta strong { display: block; font-size: 1.05rem; color: var(--ink); }
+.facility-card .meta strong.fee { color: var(--orange-dark); }
+.rating { color: var(--orange); font-weight: 700; }
+.rating small { color: var(--gray); font-weight: 500; }
+
+/* ---------- 검색 페이지 레이아웃 ---------- */
+.search-layout { display: grid; grid-template-columns: 280px 1fr; gap: 26px; align-items: start; padding: 30px 0 60px; }
+.filters { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; position: sticky; top: 90px; }
+.filters h3 { font-size: 1.1rem; margin-bottom: 12px; }
+.filter-group { border-top: 1px solid var(--line); padding: 14px 0; }
+.filter-group > label.grp { font-weight: 700; display: block; margin-bottom: 8px; font-size: .95rem; }
+.filter-group .opt { display: flex; align-items: center; gap: 8px; font-size: .92rem; margin: 5px 0; }
+.filter-group .opt input { width: 16px; height: 16px; }
+.results-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px; }
+.results-head .count strong { color: var(--green); font-size: 1.3rem; }
+
+/* ---------- 시설 상세 ---------- */
+.detail-hero { background: #fff; border-bottom: 1px solid var(--line); padding: 26px 0; }
+.detail-hero .type-label { color: var(--green); font-weight: 700; }
+.detail-hero h1 { font-size: 2rem; margin: 4px 0; }
+.detail-grid { display: grid; grid-template-columns: 1fr 340px; gap: 30px; padding: 30px 0 60px; align-items: start; }
+.detail-main .gallery { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 8px; border-radius: var(--radius); overflow: hidden; margin-bottom: 24px; }
+.detail-main .gallery div { min-height: 130px; }
+.detail-main .gallery div:first-child { grid-row: span 2; min-height: 268px; }
+.detail-section { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; margin-bottom: 18px; }
+.detail-section h2 { font-size: 1.3rem; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid var(--green-light); }
+.spec-table { width: 100%; border-collapse: collapse; }
+.spec-table th, .spec-table td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); font-size: .95rem; vertical-align: top; }
+.spec-table th { width: 130px; color: var(--gray); font-weight: 700; }
+.aside-card { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; position: sticky; top: 90px; box-shadow: var(--shadow); }
+.aside-card .fee-big { font-size: 1.8rem; font-weight: 800; color: var(--orange-dark); }
+.aside-card .fee-big small { font-size: .9rem; color: var(--gray); font-weight: 500; }
+.aside-card ul.mini { margin: 14px 0; }
+.aside-card ul.mini li { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px dashed var(--line); font-size: .92rem; }
+.aside-card .btn { margin-top: 8px; }
+
+/* ---------- 가이드 ---------- */
+.guide-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.guide-card { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; transition: .15s; }
+.guide-card:hover { box-shadow: var(--shadow-lg); transform: translateY(-3px); }
+.guide-card .ph { height: 140px; }
+.guide-card .txt { padding: 16px 18px; }
+.guide-card .cat { font-size: .8rem; color: var(--orange-dark); font-weight: 700; }
+.guide-card h3 { font-size: 1.08rem; margin: 4px 0 6px; }
+.guide-card p { font-size: .9rem; color: var(--gray); }
+
+/* ---------- FAQ ---------- */
+.faq-item { background: #fff; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
+.faq-item summary { padding: 16px 20px; font-weight: 700; cursor: pointer; list-style: none; display: flex; justify-content: space-between; gap: 12px; }
+.faq-item summary::-webkit-details-marker { display: none; }
+.faq-item summary::after { content: "+"; color: var(--green); font-size: 1.4rem; line-height: 1; }
+.faq-item[open] summary::after { content: "−"; }
+.faq-item .ans { padding: 0 20px 18px; color: var(--gray); }
+
+/* ---------- 상담 폼 ---------- */
+.consult-hero { background: linear-gradient(135deg, var(--green) 0%, var(--green-dark) 100%); color: #fff; padding: 50px 0; }
+.consult-hero h1 { font-size: 2.1rem; }
+.consult-hero p { opacity: .95; margin-top: 10px; }
+.consult-layout { display: grid; grid-template-columns: 1fr 400px; gap: 34px; padding: 40px 0 60px; align-items: start; }
+.steps { counter-reset: s; }
+.steps li { counter-increment: s; position: relative; padding-left: 52px; margin-bottom: 22px; }
+.steps li::before {
+  content: counter(s); position: absolute; left: 0; top: 0; width: 36px; height: 36px;
+  background: var(--green); color: #fff; border-radius: 50%; display: flex;
+  align-items: center; justify-content: center; font-weight: 800;
+}
+.steps li h3 { font-size: 1.1rem; }
+.steps li p { font-size: .93rem; color: var(--gray); }
+.form-card { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 26px; box-shadow: var(--shadow-lg); }
+.form-card .field { margin-bottom: 14px; }
+.form-card label { display: block; font-weight: 700; font-size: .9rem; margin-bottom: 6px; }
+.form-card input, .form-card select, .form-card textarea {
+  width: 100%; padding: 12px; border: 1px solid var(--line); border-radius: 8px; font-family: inherit; font-size: .97rem;
+}
+.form-note { font-size: .8rem; color: var(--gray); margin-top: 10px; }
+
+/* ---------- CTA 배너 ---------- */
+.cta-banner { background: var(--orange); color: #fff; text-align: center; padding: 40px 0; }
+.cta-banner h2 { font-size: 1.7rem; }
+.cta-banner p { margin: 8px 0 18px; opacity: .95; }
+.cta-banner .btn-ghost { background: #fff; color: var(--orange-dark); border-color: #fff; }
+
+/* ---------- 푸터 ---------- */
+footer.site { background: var(--ink); color: #aeb8c0; padding: 44px 0 24px; font-size: .9rem; }
+footer.site .cols { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 30px; }
+footer.site h4 { color: #fff; font-size: .95rem; margin-bottom: 12px; }
+footer.site li { margin: 7px 0; }
+footer.site a:hover { color: #fff; }
+footer.site .disclaimer { border-top: 1px solid #3a444c; margin-top: 30px; padding-top: 18px; font-size: .8rem; line-height: 1.7; }
+
+/* ---------- breadcrumb ---------- */
+.breadcrumb { font-size: .85rem; color: var(--gray); padding: 12px 0; }
+.breadcrumb a:hover { color: var(--green); }
+
+/* ---------- 반응형 ---------- */
+@media (max-width: 960px) {
+  nav.main { display: none; }
+  .menu-toggle { display: block; }
+  nav.main.open { display: block; position: absolute; top: 74px; left: 0; right: 0; background: #fff; border-bottom: 1px solid var(--line); padding: 12px 20px; }
+  nav.main.open ul { flex-direction: column; align-items: stretch; gap: 4px; }
+  nav.main.open a { padding: 12px 4px; border-bottom: 1px solid var(--line); }
+  .search-grid { grid-template-columns: repeat(2, 1fr); }
+  .region-grid { grid-template-columns: repeat(3, 1fr); }
+  .type-grid, .collection-grid, .guide-grid { grid-template-columns: 1fr 1fr; }
+  .search-layout, .detail-grid, .consult-layout { grid-template-columns: 1fr; }
+  .filters, .aside-card { position: static; }
+  .facility-card { grid-template-columns: 1fr; }
+  .facility-card .thumb { min-height: 150px; }
+  footer.site .cols { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 560px) {
+  .search-grid { grid-template-columns: 1fr; }
+  .type-grid, .collection-grid, .guide-grid, .region-grid { grid-template-columns: 1fr 1fr; }
+  .hero h1 { font-size: 1.6rem; }
+  .search-actions { flex-direction: column; }
+}
