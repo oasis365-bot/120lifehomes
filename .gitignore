@@ -34,3 +34,7 @@ desktop.ini
 data/*.xlsx
 data/*.csv
 data/*.xls
+
+# 사용자가 받은 원본 자료 폴더
+요양원자로 다운로드한것/
+*.xlsx
