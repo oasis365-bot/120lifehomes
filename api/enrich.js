@@ -56,8 +56,9 @@ async function callRetry(key, op, sym, pttn, tries = 3) {
   return call(key, op, sym, pttn);
 }
 async function fetchDetail(key, sym, pttn) {
+  const isResi = /^A0/.test(pttn || '');
   const g = parseItem((await callRetry(key, OP_GENERAL, sym, pttn)).text);
-  const c = parseItem((await callRetry(key, OP_CAPACITY, sym, pttn)).text);
+  const c = isResi ? parseItem((await callRetry(key, OP_CAPACITY, sym, pttn)).text) : { item: {} };
   const gi = g.item || {};
   const ci = c.item || {};
   const tel = [gi.locTelNo_1, gi.locTelNo_2, gi.locTelNo_3].map(x => String(x ?? '').trim()).filter(Boolean);
@@ -108,10 +109,10 @@ export default async function handler(req, res) {
     if (!haveDb()) { res.status(503).json({ error: 'db_not_configured' }); return; }
     const limit = Math.min(parseInt(q.limit, 10) || 100, 400);
 
-    // 아직 상세 미보강(capacity is null) 기관 선택
+    // 아직 상세 미보강 기관 선택 (post_no 없음 = 상세조회 안 함)
     const p = new URLSearchParams();
     p.set('select', 'id,type_code,sido');
-    p.append('capacity', 'is.null');
+    p.append('post_no', 'is.null');
     if (q.sido) p.append('sido', `eq.${q.sido}`);
     if (q.pttn) p.append('type_code', `eq.${q.pttn}`);
     p.append('order', 'id.asc');
@@ -133,9 +134,10 @@ export default async function handler(req, res) {
         try {
           const d = await fetchDetail(key, t.id, t.type_code || 'A03');
           const m = d.mapped;
-          if (m.capacity != null || m.phone) {
+          if (m.capacity != null || m.phone || m.post_no) {
             const patch = { updated_at: new Date().toISOString() };
             if (m.phone) patch.phone = m.phone;
+            if (m.post_no) patch.post_no = m.post_no;
             if (m.capacity != null) { patch.capacity = m.capacity; patch.current_count = m.current_count; }
             await sb(`facilities?id=eq.${encodeURIComponent(t.id)}`, {
               method: 'PATCH', prefer: 'return=minimal', body: patch,

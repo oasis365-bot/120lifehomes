@@ -6,7 +6,7 @@
 <title>시설 상세 | 120 라이프홈즈</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/css/style.css?v=20260831b">
+<link rel="stylesheet" href="assets/css/style.css?v=20260831c">
 </head>
 <body style="font-family:'Noto Sans KR',sans-serif">
 <div id="chrome-header"></div>
@@ -15,9 +15,9 @@
 
 <div id="chrome-footer"></div>
 
-<script src="assets/js/regioncodes.js?v=20260831b"></script>
-<script src="assets/js/data.js?v=20260831b"></script>
-<script src="assets/js/app.js?v=20260831b"></script>
+<script src="assets/js/regioncodes.js?v=20260831c"></script>
+<script src="assets/js/data.js?v=20260831c"></script>
+<script src="assets/js/app.js?v=20260831c"></script>
 <script>
   mountChrome("");
   const id = qs().id;
@@ -41,7 +41,12 @@
     const region = [f.sido, sgg].filter(Boolean).join(" ");
     const kwByType = FACILITY_TYPES.find(t => t.name === f.type_label);
     const isResidential = ["노인요양시설", "노인요양공동생활가정"].includes(f.type_label);
-    const mapQ = encodeURIComponent(`${region} ${f.name}`.trim());
+    const fullRegion = [sidoFull(f.sido), sgg].filter(Boolean).join(" ");
+    const mapName = encodeURIComponent(`${fullRegion} ${f.name}`.replace(/\s*\d+호점\s*$/, "").trim());
+    const naverUrl = f.address
+      ? `https://map.naver.com/p/search/${encodeURIComponent(f.address + " " + f.name)}`
+      : `https://map.naver.com/p/search/${mapName}`;
+    const kakaoUrl = `https://map.kakao.com/?q=${mapName}`;
     const vacancy = (f.capacity != null && f.current_count != null) ? Math.max(f.capacity - f.current_count, 0) : null;
 
     root.innerHTML = `
@@ -67,8 +72,15 @@
             <tr><th>유형</th><td>${esc(f.type_label || '장기요양기관')}</td></tr>
             <tr><th>지역</th><td>${esc(region) || '준비중'}</td></tr>
             <tr><th>전화</th><td>${f.phone ? esc(f.phone) : '<span style="color:var(--gray)">보강 중</span>'}</td></tr>
-            <tr><th>주소</th><td>${f.address ? esc(f.address) : '<span style="color:var(--gray)">도로명 주소는 보강 중입니다</span>'}
-              &nbsp; <a href="https://map.naver.com/v5/search/${mapQ}" target="_blank" rel="noopener" style="color:var(--green);font-weight:700;font-size:.9rem">네이버 지도에서 보기 ↗</a></td></tr>
+            <tr><th>주소</th><td>
+              ${f.address ? esc(f.address) : '<span style="color:var(--gray)">도로명 주소 보강 중</span>'}
+              ${f.post_no ? ` <span style="color:var(--gray);font-size:.9rem">(우편번호 ${esc(f.post_no)})</span>` : ''}
+              <div style="margin-top:6px;font-size:.9rem">
+                <a href="${naverUrl}" target="_blank" rel="noopener" style="color:var(--green);font-weight:700">네이버 지도 ↗</a>
+                &nbsp;·&nbsp;
+                <a href="${kakaoUrl}" target="_blank" rel="noopener" style="color:var(--green);font-weight:700">카카오맵 ↗</a>
+                <span style="color:var(--gray)"> — 시설명으로 검색합니다</span>
+              </div></td></tr>
             <tr><th>장기요양기관기호</th><td>${esc(f.id)}</td></tr>
             <tr><th>지정일</th><td>${f.established_at ? ymd(f.established_at) : '-'}</td></tr>
           </table>
