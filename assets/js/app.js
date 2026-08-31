@@ -33,7 +33,7 @@ function mountChrome(activePage) {
   </div></div>
   <header class="site"><div class="wrap">
     <a href="index.html" class="logo">
-      <img src="assets/logo.svg?v=3" alt="120 LIFE homes" class="logo-img">
+      <img src="assets/logo.svg?v=4" alt="120 LIFE homes" class="logo-img">
       <span class="logo-tag">전국 요양시설<br>정보 리뷰 포털</span>
     </a>
     <button class="menu-toggle" onclick="toggleMenu()" aria-label="메뉴">☰</button>
