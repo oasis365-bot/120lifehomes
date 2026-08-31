@@ -103,6 +103,19 @@ const _typeColor = {
 function typeColor(t) { return _typeColor[t] || "#6a7a8a"; }
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
+// 등록명 앞에 붙은 정렬용 기호 제거 (검색은 원본으로 유지, 표시만 정리)
+function cleanName(s) {
+  let n = String(s == null ? "" : s).replace(/["'“”‘’`]/g, "");
+  for (let i = 0; i < 5; i++) {
+    const before = n;
+    n = n.replace(/^\s*\([^()]{1,6}\)\s*/, "");                     // (A) (1) (AA+1) (+참편한) 등 짧은 괄호 접두
+    n = n.replace(/^[\s·.\-_+*~!#^@=\/\\|]+/, "");                  // 앞머리 기호
+    if (n === before) break;
+  }
+  n = n.replace(/\s{2,}/g, " ").trim();
+  return n.length >= 2 ? n : String(s || "").replace(/["'“”‘’`]/g, "").trim() || String(s || "");
+}
+
 function sgName(f) {
   return f.sigungu_nm || (typeof sigunguName === "function" && sigunguName(f.sigungu)) || "";
 }
@@ -123,7 +136,7 @@ function facilityCardHTML(f) {
     </div>
     <div class="body">
       <div class="type-label">${esc(f.type_label || "장기요양기관")} ${gradeBadge(f.eval_grade)}</div>
-      <h3>${esc(f.name)}</h3>
+      <h3>${esc(cleanName(f.name))}</h3>
       <div class="addr">${esc(addrShort) || "지역 정보 준비중"}</div>
       <div class="meta">
         <div>전화<strong>${f.phone ? esc(f.phone) : "준비중"}</strong></div>

@@ -6,7 +6,7 @@
 <title>시설 상세 | 120 라이프홈즈</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/css/style.css?v=20260831h">
+<link rel="stylesheet" href="assets/css/style.css?v=20260831i">
 </head>
 <body style="font-family:'Noto Sans KR',sans-serif">
 <div id="chrome-header"></div>
@@ -15,9 +15,9 @@
 
 <div id="chrome-footer"></div>
 
-<script src="assets/js/regioncodes.js?v=20260831h"></script>
-<script src="assets/js/data.js?v=20260831h"></script>
-<script src="assets/js/app.js?v=20260831h"></script>
+<script src="assets/js/regioncodes.js?v=20260831i"></script>
+<script src="assets/js/data.js?v=20260831i"></script>
+<script src="assets/js/app.js?v=20260831i"></script>
 <script>
   mountChrome("");
   const id = qs().id;
@@ -35,14 +35,14 @@
       if (!f) return notFound();
     } catch (e) { return notFound(); }
 
-    document.title = `${f.name} | 120 라이프홈즈`;
+    document.title = `${cleanName(f.name)} | 120 라이프홈즈`;
     const c = typeColor(f.type_label);
     const sgg = f.sigungu_nm || (typeof sigunguName === "function" && sigunguName(f.sigungu)) || "";
     const region = [f.sido, sgg, f.dong_nm].filter(Boolean).join(" ");
     const kwByType = FACILITY_TYPES.find(t => t.name === f.type_label);
     const isResidential = ["노인요양시설", "노인요양공동생활가정"].includes(f.type_label);
     const fullRegion = [sidoFull(f.sido), sgg].filter(Boolean).join(" ");
-    const mapQ = f.address || `${fullRegion} ${f.name}`.replace(/\s*\d+호점\s*$/, "").trim();
+    const mapQ = f.address || `${fullRegion} ${cleanName(f.name)}`.replace(/\s*\d+호점\s*$/, "").trim();
     const naverUrl = `https://map.naver.com/p/search/${encodeURIComponent(mapQ)}`;
     const kakaoUrl = `https://map.kakao.com/?q=${encodeURIComponent(mapQ)}`;
     const vacancy = (f.capacity != null && f.current_count != null) ? Math.max(f.capacity - f.current_count, 0) : null;
@@ -50,9 +50,9 @@
 
     root.innerHTML = `
     <div class="detail-hero"><div class="wrap">
-      <div class="breadcrumb"><a href="index.html">홈</a> › <a href="search.html?sido=${encodeURIComponent(f.sido||'')}">${esc(region)}</a> › <a href="search.html?type=${encodeURIComponent(f.type_label||'')}">${esc(f.type_label||'장기요양기관')}</a> › ${esc(f.name)}</div>
+      <div class="breadcrumb"><a href="index.html">홈</a> › <a href="search.html?sido=${encodeURIComponent(f.sido||'')}">${esc(region)}</a> › <a href="search.html?type=${encodeURIComponent(f.type_label||'')}">${esc(f.type_label||'장기요양기관')}</a> › ${esc(cleanName(f.name))}</div>
       <div class="type-label">${esc(f.type_label || '장기요양기관')}</div>
-      <h1>${esc(f.name)}</h1>
+      <h1>${esc(cleanName(f.name))}</h1>
       <div style="color:var(--gray)">${esc(region)}${f.address ? ' · ' + esc(f.address) : ''}</div>
     </div></div>
 
@@ -67,7 +67,7 @@
         <div class="detail-section">
           <h2>기본 정보</h2>
           <table class="spec-table">
-            <tr><th>기관명</th><td>${esc(f.name)}</td></tr>
+            <tr><th>기관명</th><td>${esc(cleanName(f.name))} <span style="color:var(--gray);font-size:.82rem">(등록명: ${esc(f.name)})</span></td></tr>
             <tr><th>유형</th><td>${esc(f.type_label || '장기요양기관')}</td></tr>
             <tr><th>전화</th><td>${f.phone ? esc(f.phone) : '<span style="color:var(--gray)">보강 중</span>'}</td></tr>
             <tr><th>주소</th><td>
@@ -120,7 +120,7 @@
       <aside>
         <div class="aside-card">
           <div style="color:var(--gray);font-size:.85rem">${esc(f.type_label || '장기요양기관')}</div>
-          <div style="font-size:1.4rem;font-weight:800;margin:4px 0 12px">${esc(f.name)}</div>
+          <div style="font-size:1.4rem;font-weight:800;margin:4px 0 12px">${esc(cleanName(f.name))}</div>
           <ul class="mini">
             <li><span>지역</span><strong>${esc(region) || '준비중'}</strong></li>
             <li><span>전화</span><strong>${f.phone ? esc(f.phone) : '준비중'}</strong></li>
@@ -128,7 +128,7 @@
               ? `<li><span>정원 / 현원</span><strong>${f.capacity} / ${f.current_count != null ? f.current_count : '-'}명</strong></li>`
               : `<li><span>지정일</span><strong>${f.established_at ? ymd(f.established_at) : '-'}</strong></li>`}
           </ul>
-          <a href="consult.html?facility=${encodeURIComponent(f.name)}" class="btn btn-primary btn-block">견학 · 상담 신청</a>
+          <a href="consult.html?facility=${encodeURIComponent(cleanName(f.name))}" class="btn btn-primary btn-block">견학 · 상담 신청</a>
           <a href="consult.html" class="btn btn-ghost btn-block" style="margin-top:8px">전화 상담 1600-0000</a>
           <p style="font-size:.78rem;color:var(--gray);margin-top:12px">신청하시면 상담원이 공실·비용을 확인해 연락드립니다.</p>
         </div>
