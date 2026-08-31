@@ -15,8 +15,8 @@ export const config = { maxDuration: 60 }; // Vercel Hobby 최대
 const BASE = process.env.DATA_GO_KR_BASE || 'https://apis.data.go.kr/B550928/searchLtcInsttService02';
 const OP = process.env.DATA_GO_KR_OP || 'getLtcInsttSeachList02';
 
-// 17개 시도 법정동 코드
-const SIDO_CODES = ['11', '26', '27', '28', '29', '30', '31', '36', '41', '43', '44', '45', '46', '47', '48', '50', '51'];
+// 시도 코드 (실측: 강원 51, 전북 52 신코드. 광주 29·전남 46 은 이 API 에 데이터 없음 — 상세 API 로 보완 예정)
+const SIDO_CODES = ['11', '26', '27', '28', '29', '30', '31', '36', '41', '43', '44', '46', '47', '48', '50', '51', '52'];
 const SIDO = {
   '11': '서울', '26': '부산', '27': '대구', '28': '인천', '29': '광주', '30': '대전',
   '31': '울산', '36': '세종', '41': '경기', '43': '충북', '44': '충남', '45': '전북',
@@ -72,6 +72,19 @@ export default async function handler(req, res) {
         out[cd] = { total: p.totalCount, first: p.items[0] || null };
       }
       res.status(200).json({ base: BASE, op: OP, out });
+      return;
+    }
+    if (mode === 'stats' && haveDb()) {
+      const { count: total } = await sb('facilities?select=id&limit=1', { prefer: 'count=exact' });
+      const bySido = {};
+      for (const s of ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주']) {
+        const { count } = await sb(`facilities?select=id&sido=eq.${encodeURIComponent(s)}&limit=1`, { prefer: 'count=exact' });
+        bySido[s] = count;
+      }
+      const { data: sample } = await sb('facilities?select=type_code&limit=2000');
+      const byType = {};
+      for (const r of sample || []) byType[r.type_code || 'null'] = (byType[r.type_code || 'null'] || 0) + 1;
+      res.status(200).json({ total, bySido, typeCodeSample: byType });
       return;
     }
 
