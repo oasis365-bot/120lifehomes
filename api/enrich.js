@@ -112,26 +112,29 @@ export default async function handler(req, res) {
     }
 
     const started = Date.now();
-    let updated = 0, errors = 0;
-    for (const t of targets) {
-      try {
-        const d = await fetchDetail(key, t.id, t.type_code || 'A03');
-        const m = d.mapped;
-        // 의미있는 값이 하나라도 있을 때만 업데이트
-        if (m.capacity != null || m.phone) {
-          const patch = { updated_at: new Date().toISOString() };
-          if (m.phone) patch.phone = m.phone;
-          if (m.capacity != null) { patch.capacity = m.capacity; patch.current_count = m.current_count; }
-          await sb(`facilities?id=eq.${encodeURIComponent(t.id)}`, {
-            method: 'PATCH', prefer: 'return=minimal', body: patch,
-          });
-          updated += 1;
-        }
-      } catch (e) { errors += 1; }
-      if (Date.now() - started > 52000) break; // 시간 안전장치
-      await sleep(60);
+    let updated = 0, errors = 0, processed = 0;
+    const CONCURRENCY = 8;
+    for (let i = 0; i < targets.length; i += CONCURRENCY) {
+      if (Date.now() - started > 50000) break;
+      const slice = targets.slice(i, i + CONCURRENCY);
+      await Promise.all(slice.map(async (t) => {
+        processed += 1;
+        try {
+          const d = await fetchDetail(key, t.id, t.type_code || 'A03');
+          const m = d.mapped;
+          if (m.capacity != null || m.phone) {
+            const patch = { updated_at: new Date().toISOString() };
+            if (m.phone) patch.phone = m.phone;
+            if (m.capacity != null) { patch.capacity = m.capacity; patch.current_count = m.current_count; }
+            await sb(`facilities?id=eq.${encodeURIComponent(t.id)}`, {
+              method: 'PATCH', prefer: 'return=minimal', body: patch,
+            });
+            updated += 1;
+          }
+        } catch (e) { errors += 1; }
+      }));
     }
-    res.status(200).json({ ok: true, picked: targets.length, updated, errors, elapsedMs: Date.now() - started });
+    res.status(200).json({ ok: true, picked: targets.length, processed, updated, errors, elapsedMs: Date.now() - started });
   } catch (e) {
     console.error('[enrich]', e);
     res.status(500).json({ error: 'enrich_failed', detail: String(e.message || e).slice(0, 300) });

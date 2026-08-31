@@ -15,6 +15,7 @@
 
 <div id="chrome-footer"></div>
 
+<script src="assets/js/regioncodes.js"></script>
 <script src="assets/js/data.js"></script>
 <script src="assets/js/app.js"></script>
 <script>
@@ -36,8 +37,12 @@
 
     document.title = `${f.name} | 120 라이프홈즈`;
     const c = typeColor(f.type_label);
-    const region = [f.sido].filter(Boolean).join(" ");
+    const sgg = (typeof sigunguName === "function" && sigunguName(f.sigungu)) || "";
+    const region = [f.sido, sgg].filter(Boolean).join(" ");
     const kwByType = FACILITY_TYPES.find(t => t.name === f.type_label);
+    const isResidential = ["노인요양시설", "노인요양공동생활가정"].includes(f.type_label);
+    const mapQ = encodeURIComponent(`${region} ${f.name}`.trim());
+    const vacancy = (f.capacity != null && f.current_count != null) ? Math.max(f.capacity - f.current_count, 0) : null;
 
     root.innerHTML = `
     <div class="detail-hero"><div class="wrap">
@@ -59,28 +64,36 @@
           <h2>기본 정보</h2>
           <table class="spec-table">
             <tr><th>기관명</th><td>${esc(f.name)}</td></tr>
-            <tr><th>유형</th><td>${esc(f.type_label || '장기요양기관')} <span style="color:var(--gray);font-size:.85rem">(코드 ${esc(f.type_code||'-')})</span></td></tr>
-            <tr><th>지역</th><td>${esc(region)}</td></tr>
+            <tr><th>유형</th><td>${esc(f.type_label || '장기요양기관')}</td></tr>
+            <tr><th>지역</th><td>${esc(region) || '준비중'}</td></tr>
+            <tr><th>전화</th><td>${f.phone ? esc(f.phone) : '<span style="color:var(--gray)">보강 중</span>'}</td></tr>
+            <tr><th>주소</th><td>${f.address ? esc(f.address) : '<span style="color:var(--gray)">도로명 주소는 보강 중입니다</span>'}
+              &nbsp; <a href="https://map.naver.com/v5/search/${mapQ}" target="_blank" rel="noopener" style="color:var(--green);font-weight:700;font-size:.9rem">네이버 지도에서 보기 ↗</a></td></tr>
             <tr><th>장기요양기관기호</th><td>${esc(f.id)}</td></tr>
             <tr><th>지정일</th><td>${f.established_at ? ymd(f.established_at) : '-'}</td></tr>
-            <tr><th>주소</th><td>${f.address ? esc(f.address) : '<span style="color:var(--gray)">상세 주소는 보강 중입니다</span>'}</td></tr>
-            <tr><th>전화</th><td>${f.phone ? esc(f.phone) : '<span style="color:var(--gray)">보강 중</span>'}</td></tr>
           </table>
           ${kwByType ? `<p style="margin-top:12px;color:var(--gray);font-size:.95rem">${kwByType.desc}</p>` : ''}
         </div>
 
+        ${isResidential ? `
         <div class="detail-section">
-          <h2>상세 정보 (보강 예정)</h2>
-          <p style="color:var(--gray)">
-            정원·현원, 평가등급, 프로그램, 인력 현황, 월 비용 등 상세 정보는
-            국민건강보험공단 상세조회 데이터 연동으로 순차 제공될 예정입니다.
-            지금 필요하시면 아래 <strong>견학·상담 신청</strong>을 이용해 주세요 — 상담원이 직접 확인해 드립니다.
-          </p>
-          <table class="spec-table" style="margin-top:10px">
-            <tr><th>정원 / 현원</th><td>준비중</td></tr>
-            <tr><th>평가등급</th><td>준비중</td></tr>
-            <tr><th>월 이용료(예상)</th><td>준비중</td></tr>
+          <h2>정원 · 현원</h2>
+          ${f.capacity != null ? `
+          <table class="spec-table">
+            <tr><th>정원</th><td><strong>${f.capacity}명</strong></td></tr>
+            <tr><th>현원</th><td>${f.current_count != null ? f.current_count + '명' : '-'}</td></tr>
+            <tr><th>정원 대비 여유</th><td>${vacancy != null ? '<strong style="color:var(--green-dark)">약 ' + vacancy + '명</strong>' : '-'} <span style="color:var(--gray);font-size:.85rem">(실제 입소 가능 여부는 시설 확인 필요)</span></td></tr>
           </table>
+          <p style="font-size:.82rem;color:var(--gray);margin-top:8px">※ 국민건강보험공단 상세조회 데이터. 갱신 시점에 따라 실제와 차이가 있을 수 있습니다.</p>
+          ` : `<p style="color:var(--gray)">정원·현원 정보를 보강 중입니다.</p>`}
+        </div>` : ''}
+
+        <div class="detail-section">
+          <h2>더 자세한 정보가 필요하신가요?</h2>
+          <p style="color:var(--gray)">
+            평가등급, 프로그램, 인력 현황, 월 비용, 실제 입소 가능 여부는 시설마다 다릅니다.
+            아래 <strong>견학·상담 신청</strong>을 이용하시면 상담원이 직접 확인해 정리해 드립니다.
+          </p>
         </div>
 
         <div class="detail-section">
@@ -97,9 +110,11 @@
           <div style="color:var(--gray);font-size:.85rem">${esc(f.type_label || '장기요양기관')}</div>
           <div style="font-size:1.4rem;font-weight:800;margin:4px 0 12px">${esc(f.name)}</div>
           <ul class="mini">
-            <li><span>지역</span><strong>${esc(region)}</strong></li>
-            <li><span>지정일</span><strong>${f.established_at ? ymd(f.established_at) : '-'}</strong></li>
-            <li><span>기관기호</span><strong>${esc(f.id)}</strong></li>
+            <li><span>지역</span><strong>${esc(region) || '준비중'}</strong></li>
+            <li><span>전화</span><strong>${f.phone ? esc(f.phone) : '준비중'}</strong></li>
+            ${isResidential && f.capacity != null
+              ? `<li><span>정원 / 현원</span><strong>${f.capacity} / ${f.current_count != null ? f.current_count : '-'}명</strong></li>`
+              : `<li><span>지정일</span><strong>${f.established_at ? ymd(f.established_at) : '-'}</strong></li>`}
           </ul>
           <a href="consult.html?facility=${encodeURIComponent(f.name)}" class="btn btn-primary btn-block">견학 · 상담 신청</a>
           <a href="consult.html" class="btn btn-ghost btn-block" style="margin-top:8px">전화 상담 1600-0000</a>

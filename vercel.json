@@ -12,6 +12,7 @@
     }
   ],
   "crons": [
-    { "path": "/api/ingest", "schedule": "0 18 * * *" }
+    { "path": "/api/ingest", "schedule": "0 18 * * *" },
+    { "path": "/api/enrich?limit=1500", "schedule": "0 19 * * *" }
   ]
 }

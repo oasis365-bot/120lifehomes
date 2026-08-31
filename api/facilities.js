@@ -13,8 +13,9 @@ export default async function handler(req, res) {
   const page = Math.max(parseInt(q.page, 10) || 1, 1);
 
   const p = new URLSearchParams();
-  p.set('select', 'id,name,type_code,type_label,sido,sigungu,address,road_address,phone,capacity,eval_grade,established_at,is_partner');
+  p.set('select', 'id,name,type_code,type_label,sido,sigungu,address,road_address,phone,capacity,current_count,eval_grade,established_at,is_partner');
   if (q.sido) p.append('sido', `eq.${q.sido}`);
+  if (q.sigungu) p.append('sigungu', `eq.${q.sigungu}`);
   if (q.type) p.append('type_label', `eq.${q.type}`);
   if (q.partner === '1') p.append('is_partner', 'eq.true');
   if (q.q) {

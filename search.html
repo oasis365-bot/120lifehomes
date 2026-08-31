@@ -21,8 +21,12 @@
       <form id="filterForm" onsubmit="return false">
         <div class="filter-group">
           <label class="grp" for="fRegion">지역 (시도)</label>
-          <select id="fRegion" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
+          <select id="fRegion" onchange="fillSigungu()" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
             <option value="">전체 지역</option>
+          </select>
+          <label class="grp" for="fSigungu" style="margin-top:8px">시·군·구</label>
+          <select id="fSigungu" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
+            <option value="">전체</option>
           </select>
         </div>
 
@@ -66,6 +70,7 @@
 
 <div id="chrome-footer"></div>
 
+<script src="assets/js/regioncodes.js"></script>
 <script src="assets/js/data.js"></script>
 <script src="assets/js/app.js"></script>
 <script>
@@ -73,6 +78,25 @@
   const params = qs();
 
   const fRegion = document.getElementById("fRegion");
+  const fSigungu = document.getElementById("fSigungu");
+
+  // 시도별 시군구 인덱스
+  const SGG_BY_SIDO = {};
+  for (const [code, name] of Object.entries(SIGUNGU)) {
+    const cd2 = code.slice(0, 2);
+    (SGG_BY_SIDO[cd2] = SGG_BY_SIDO[cd2] || []).push([code, name]);
+  }
+  Object.values(SGG_BY_SIDO).forEach(a => a.sort((x, y) => x[1].localeCompare(y[1], "ko")));
+
+  function fillSigungu(keep) {
+    const r = REGIONS.find(x => x.name === fRegion.value);
+    fSigungu.innerHTML = '<option value="">전체</option>';
+    if (r && SGG_BY_SIDO[r.cd]) {
+      SGG_BY_SIDO[r.cd].forEach(([code, name]) => fSigungu.add(new Option(name, code)));
+    }
+    if (keep) fSigungu.value = keep;
+  }
+  window.fillSigungu = fillSigungu;
   REGIONS.forEach(r => {
     const label = r.count ? `${r.name} (${r.count.toLocaleString()})` : `${r.name} (준비중)`;
     fRegion.add(new Option(label, r.name));
@@ -84,6 +108,7 @@
   // URL 파라미터 반영
   if (params.sido) fRegion.value = params.sido;
   if (params.region) fRegion.value = params.region;
+  fillSigungu(params.sigungu);
   if (params.type) {
     const rb = [...document.querySelectorAll('input[name="ftype"]')].find(x => x.value === params.type);
     if (rb) rb.checked = true;
@@ -96,6 +121,7 @@
     const type = (document.querySelector('input[name="ftype"]:checked') || {}).value || "";
     return {
       sido: fRegion.value || "",
+      sigungu: fSigungu.value || "",
       type,
       q: document.getElementById("fq").value.trim(),
       sort: document.getElementById("sort").value,
@@ -105,6 +131,7 @@
   function buildUrl(q, pg) {
     const u = new URLSearchParams();
     if (q.sido) u.set("sido", q.sido);
+    if (q.sigungu) u.set("sigungu", q.sigungu);
     if (q.type) u.set("type", q.type);
     if (q.q) u.set("q", q.q);
     u.set("sort", q.sort);
@@ -145,6 +172,7 @@
     const q = currentQuery();
     const u = new URLSearchParams();
     if (q.sido) u.set("sido", q.sido);
+    if (q.sigungu) u.set("sigungu", q.sigungu);
     if (q.type) u.set("type", q.type);
     if (q.q) u.set("q", q.q);
     history.replaceState(null, "", "search.html?" + u.toString());
@@ -153,6 +181,7 @@
   function resetFilters() {
     document.getElementById("filterForm").reset();
     document.querySelector('input[name="ftype"][value=""]').checked = true;
+    fillSigungu();
     history.replaceState(null, "", "search.html");
     fetchPage(true);
   }
@@ -162,7 +191,7 @@
   window.loadMore = loadMore;
 
   // 최초 로드: 파라미터가 있으면 바로 검색, 없으면 안내
-  if (params.sido || params.region || params.type || params.q) applyFilters();
+  if (params.sido || params.region || params.sigungu || params.type || params.q) applyFilters();
   else fetchPage(true);
 </script>
 </body>
