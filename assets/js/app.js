@@ -104,29 +104,35 @@ function typeColor(t) { return _typeColor[t] || "#6a7a8a"; }
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
 function sgName(f) {
-  return (typeof sigunguName === "function" && sigunguName(f.sigungu)) || "";
+  return f.sigungu_nm || (typeof sigunguName === "function" && sigunguName(f.sigungu)) || "";
+}
+function gradeBadge(g) {
+  if (!g) return "";
+  const col = { A: "#1f8a4c", B: "#3a9bd4", C: "#e0912f", D: "#c0663a", E: "#b5546a" }[g] || "#6a7a8a";
+  return `<span style="display:inline-block;background:${col};color:#fff;border-radius:5px;padding:1px 7px;font-size:.82rem;font-weight:800">평가 ${g}</span>`;
 }
 function facilityCardHTML(f) {
   const c = typeColor(f.type_label);
-  const region = [f.sido, sgName(f)].filter(Boolean).join(" ");
+  const region = [f.sido, sgName(f), f.dong_nm].filter(Boolean).join(" ");
   const isResidential = ["노인요양시설", "노인요양공동생활가정"].includes(f.type_label);
+  const addrShort = f.address || region;
   return `
   <a class="facility-card" href="facility.html?id=${encodeURIComponent(f.id)}">
     <div class="thumb" style="background:linear-gradient(135deg,${c},${c}cc)">
       <span class="badge" style="background:rgba(255,255,255,.92);color:${c}">${esc(f.type_label || "장기요양기관")}</span>
     </div>
     <div class="body">
-      <div class="type-label">${esc(f.type_label || "장기요양기관")}</div>
+      <div class="type-label">${esc(f.type_label || "장기요양기관")} ${gradeBadge(f.eval_grade)}</div>
       <h3>${esc(f.name)}</h3>
-      <div class="addr">${esc(region) || "지역 정보 준비중"}${f.address ? " · " + esc(f.address) : ""}</div>
+      <div class="addr">${esc(addrShort) || "지역 정보 준비중"}</div>
       <div class="meta">
         <div>전화<strong>${f.phone ? esc(f.phone) : "준비중"}</strong></div>
         ${isResidential
-          ? `<div>정원<strong>${f.capacity != null ? f.capacity + "명" : "준비중"}</strong></div>
+          ? `<div>정원<strong>${f.capacity != null ? f.capacity + "명" : "-"}</strong></div>
              <div>현원<strong>${f.current_count != null ? f.current_count + "명" : "준비중"}</strong></div>
-             <div>대기 여유<strong>${(f.capacity != null && f.current_count != null) ? Math.max(f.capacity - f.current_count, 0) + "명" : "-"}</strong></div>`
+             <div>지정일<strong>${f.established_at ? ymd(f.established_at) : "-"}</strong></div>`
           : `<div>지정일<strong>${f.established_at ? ymd(f.established_at) : "-"}</strong></div>
-             <div>평가등급<strong>${f.eval_grade || "준비중"}</strong></div>
+             <div>우편<strong>${f.post_no || "-"}</strong></div>
              <div></div>`}
       </div>
     </div>

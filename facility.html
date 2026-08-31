@@ -6,7 +6,7 @@
 <title>시설 상세 | 120 라이프홈즈</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/css/style.css?v=20260831c">
+<link rel="stylesheet" href="assets/css/style.css?v=20260831d">
 </head>
 <body style="font-family:'Noto Sans KR',sans-serif">
 <div id="chrome-header"></div>
@@ -15,9 +15,9 @@
 
 <div id="chrome-footer"></div>
 
-<script src="assets/js/regioncodes.js?v=20260831c"></script>
-<script src="assets/js/data.js?v=20260831c"></script>
-<script src="assets/js/app.js?v=20260831c"></script>
+<script src="assets/js/regioncodes.js?v=20260831d"></script>
+<script src="assets/js/data.js?v=20260831d"></script>
+<script src="assets/js/app.js?v=20260831d"></script>
 <script>
   mountChrome("");
   const id = qs().id;
@@ -37,17 +37,16 @@
 
     document.title = `${f.name} | 120 라이프홈즈`;
     const c = typeColor(f.type_label);
-    const sgg = (typeof sigunguName === "function" && sigunguName(f.sigungu)) || "";
-    const region = [f.sido, sgg].filter(Boolean).join(" ");
+    const sgg = f.sigungu_nm || (typeof sigunguName === "function" && sigunguName(f.sigungu)) || "";
+    const region = [f.sido, sgg, f.dong_nm].filter(Boolean).join(" ");
     const kwByType = FACILITY_TYPES.find(t => t.name === f.type_label);
     const isResidential = ["노인요양시설", "노인요양공동생활가정"].includes(f.type_label);
     const fullRegion = [sidoFull(f.sido), sgg].filter(Boolean).join(" ");
-    const mapName = encodeURIComponent(`${fullRegion} ${f.name}`.replace(/\s*\d+호점\s*$/, "").trim());
-    const naverUrl = f.address
-      ? `https://map.naver.com/p/search/${encodeURIComponent(f.address + " " + f.name)}`
-      : `https://map.naver.com/p/search/${mapName}`;
-    const kakaoUrl = `https://map.kakao.com/?q=${mapName}`;
+    const mapQ = f.address || `${fullRegion} ${f.name}`.replace(/\s*\d+호점\s*$/, "").trim();
+    const naverUrl = `https://map.naver.com/p/search/${encodeURIComponent(mapQ)}`;
+    const kakaoUrl = `https://map.kakao.com/?q=${encodeURIComponent(mapQ)}`;
     const vacancy = (f.capacity != null && f.current_count != null) ? Math.max(f.capacity - f.current_count, 0) : null;
+    const gcol = { A: "#1f8a4c", B: "#3a9bd4", C: "#e0912f", D: "#c0663a", E: "#b5546a" }[f.eval_grade] || "#6a7a8a";
 
     root.innerHTML = `
     <div class="detail-hero"><div class="wrap">
@@ -70,17 +69,18 @@
           <table class="spec-table">
             <tr><th>기관명</th><td>${esc(f.name)}</td></tr>
             <tr><th>유형</th><td>${esc(f.type_label || '장기요양기관')}</td></tr>
-            <tr><th>지역</th><td>${esc(region) || '준비중'}</td></tr>
             <tr><th>전화</th><td>${f.phone ? esc(f.phone) : '<span style="color:var(--gray)">보강 중</span>'}</td></tr>
             <tr><th>주소</th><td>
-              ${f.address ? esc(f.address) : '<span style="color:var(--gray)">도로명 주소 보강 중</span>'}
-              ${f.post_no ? ` <span style="color:var(--gray);font-size:.9rem">(우편번호 ${esc(f.post_no)})</span>` : ''}
+              ${f.address ? esc(f.address) : (esc(region) || '<span style="color:var(--gray)">주소 보강 중</span>')}
+              ${f.post_no ? ` <span style="color:var(--gray);font-size:.9rem">(우편 ${esc(f.post_no)})</span>` : ''}
               <div style="margin-top:6px;font-size:.9rem">
                 <a href="${naverUrl}" target="_blank" rel="noopener" style="color:var(--green);font-weight:700">네이버 지도 ↗</a>
                 &nbsp;·&nbsp;
                 <a href="${kakaoUrl}" target="_blank" rel="noopener" style="color:var(--green);font-weight:700">카카오맵 ↗</a>
-                <span style="color:var(--gray)"> — 시설명으로 검색합니다</span>
               </div></td></tr>
+            ${f.eval_grade ? `<tr><th>평가등급</th><td>
+              <span style="background:${gcol};color:#fff;border-radius:5px;padding:2px 10px;font-weight:800">${esc(f.eval_grade)}</span>
+              <span style="color:var(--gray);font-size:.88rem"> · 국민건강보험공단 정기평가${f.eval_date ? ' (' + ymd(f.eval_date) + ')' : ''}</span></td></tr>` : ''}
             <tr><th>장기요양기관기호</th><td>${esc(f.id)}</td></tr>
             <tr><th>지정일</th><td>${f.established_at ? ymd(f.established_at) : '-'}</td></tr>
           </table>
@@ -103,7 +103,7 @@
         <div class="detail-section">
           <h2>더 자세한 정보가 필요하신가요?</h2>
           <p style="color:var(--gray)">
-            평가등급, 프로그램, 인력 현황, 월 비용, 실제 입소 가능 여부는 시설마다 다릅니다.
+            프로그램, 인력 현황, 월 비용, <strong>실제 입소 가능 여부</strong>는 시설마다 다르고 수시로 바뀝니다.
             아래 <strong>견학·상담 신청</strong>을 이용하시면 상담원이 직접 확인해 정리해 드립니다.
           </p>
         </div>

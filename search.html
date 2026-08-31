@@ -7,7 +7,7 @@
 <meta name="description" content="지역과 시설 유형, 기관명으로 전국 장기요양기관을 검색합니다. 국민건강보험공단 공공데이터 기반.">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/css/style.css?v=20260831c">
+<link rel="stylesheet" href="assets/css/style.css?v=20260831d">
 </head>
 <body style="font-family:'Noto Sans KR',sans-serif">
 <div id="chrome-header"></div>
@@ -36,6 +36,18 @@
         </div>
 
         <div class="filter-group">
+          <label class="grp" for="fGrade">평가등급</label>
+          <select id="fGrade" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
+            <option value="">전체</option>
+            <option value="A">A (최우수)</option>
+            <option value="B">B (우수)</option>
+            <option value="C">C (양호)</option>
+            <option value="D">D (보통)</option>
+            <option value="E">E (미흡)</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
           <label class="grp" for="fq">기관명 검색</label>
           <input id="fq" type="text" placeholder="예) 행복요양원" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
         </div>
@@ -44,7 +56,7 @@
         <button type="button" class="btn btn-ghost btn-block" style="margin-top:8px" onclick="resetFilters()">조건 초기화</button>
       </form>
       <p style="font-size:.78rem;color:var(--gray);margin-top:14px;line-height:1.6">
-        국민건강보험공단 공공데이터 기반. 주소·정원·평가등급 등 상세 정보는 순차 보강 중입니다.
+        국민건강보험공단 공공데이터 기반 (주소·정원·평가등급 포함). 실시간 공실은 시설 확인이 필요합니다.
       </p>
     </aside>
 
@@ -70,9 +82,9 @@
 
 <div id="chrome-footer"></div>
 
-<script src="assets/js/regioncodes.js?v=20260831c"></script>
-<script src="assets/js/data.js?v=20260831c"></script>
-<script src="assets/js/app.js?v=20260831c"></script>
+<script src="assets/js/regioncodes.js?v=20260831d"></script>
+<script src="assets/js/data.js?v=20260831d"></script>
+<script src="assets/js/app.js?v=20260831d"></script>
 <script>
   mountChrome("search");
   const params = qs();
@@ -92,7 +104,11 @@
     const r = REGIONS.find(x => x.name === fRegion.value);
     fSigungu.innerHTML = '<option value="">전체</option>';
     if (r && SGG_BY_SIDO[r.cd]) {
-      SGG_BY_SIDO[r.cd].forEach(([code, name]) => fSigungu.add(new Option(name, code)));
+      const seen = new Set();
+      SGG_BY_SIDO[r.cd].forEach(([code, name]) => {
+        if (seen.has(name)) return; seen.add(name);
+        fSigungu.add(new Option(name, name));   // 값 = 시군구 이름 (sigungu_nm)
+      });
     }
     if (keep) fSigungu.value = keep;
   }
@@ -108,11 +124,12 @@
   // URL 파라미터 반영
   if (params.sido) fRegion.value = params.sido;
   if (params.region) fRegion.value = params.region;
-  fillSigungu(params.sigungu);
+  fillSigungu(params.sigungu_nm || params.sigungu);
   if (params.type) {
     const rb = [...document.querySelectorAll('input[name="ftype"]')].find(x => x.value === params.type);
     if (rb) rb.checked = true;
   }
+  if (params.grade) document.getElementById("fGrade").value = params.grade;
   if (params.q) document.getElementById("fq").value = params.q;
 
   let page = 1, done = false, loading = false, total = 0;
@@ -121,7 +138,8 @@
     const type = (document.querySelector('input[name="ftype"]:checked') || {}).value || "";
     return {
       sido: fRegion.value || "",
-      sigungu: fSigungu.value || "",
+      sigungu_nm: fSigungu.value || "",
+      grade: document.getElementById("fGrade").value || "",
       type,
       q: document.getElementById("fq").value.trim(),
       sort: document.getElementById("sort").value,
@@ -131,7 +149,8 @@
   function buildUrl(q, pg) {
     const u = new URLSearchParams();
     if (q.sido) u.set("sido", q.sido);
-    if (q.sigungu) u.set("sigungu", q.sigungu);
+    if (q.sigungu_nm) u.set("sigungu_nm", q.sigungu_nm);
+    if (q.grade) u.set("grade", q.grade);
     if (q.type) u.set("type", q.type);
     if (q.q) u.set("q", q.q);
     u.set("sort", q.sort);
@@ -172,7 +191,8 @@
     const q = currentQuery();
     const u = new URLSearchParams();
     if (q.sido) u.set("sido", q.sido);
-    if (q.sigungu) u.set("sigungu", q.sigungu);
+    if (q.sigungu_nm) u.set("sigungu_nm", q.sigungu_nm);
+    if (q.grade) u.set("grade", q.grade);
     if (q.type) u.set("type", q.type);
     if (q.q) u.set("q", q.q);
     history.replaceState(null, "", "search.html?" + u.toString());
@@ -191,7 +211,7 @@
   window.loadMore = loadMore;
 
   // 최초 로드: 파라미터가 있으면 바로 검색, 없으면 안내
-  if (params.sido || params.region || params.sigungu || params.type || params.q) applyFilters();
+  if (params.sido || params.region || params.sigungu || params.sigungu_nm || params.grade || params.type || params.q) applyFilters();
   else fetchPage(true);
 </script>
 </body>

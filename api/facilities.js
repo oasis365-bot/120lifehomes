@@ -13,10 +13,12 @@ export default async function handler(req, res) {
   const page = Math.max(parseInt(q.page, 10) || 1, 1);
 
   const p = new URLSearchParams();
-  p.set('select', 'id,name,type_code,type_label,sido,sigungu,address,road_address,phone,capacity,current_count,eval_grade,established_at,is_partner');
+  p.set('select', 'id,name,type_code,type_label,sido,sigungu,sigungu_nm,dong_nm,address,post_no,phone,capacity,current_count,eval_grade,eval_date,established_at,is_partner');
   if (q.sido) p.append('sido', `eq.${q.sido}`);
-  if (q.sigungu) p.append('sigungu', `eq.${q.sigungu}`);
+  if (q.sigungu_nm) p.append('sigungu_nm', `eq.${q.sigungu_nm}`);
+  else if (q.sigungu) p.append('sigungu', `eq.${q.sigungu}`);
   if (q.type) p.append('type_label', `eq.${q.type}`);
+  if (q.grade) p.append('eval_grade', `eq.${q.grade}`);
   if (q.partner === '1') p.append('is_partner', 'eq.true');
   if (q.q) {
     const kw = String(q.q).replace(/[%,()*]/g, '').trim();
