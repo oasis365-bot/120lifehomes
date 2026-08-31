@@ -80,8 +80,16 @@ export default async function handler(req, res) {
   try {
     if (q.mode === 'one') {
       if (!q.sym) { res.status(400).json({ error: 'sym 필요' }); return; }
-      const d = await fetchDetail(key, q.sym, q.pttn || 'A03');
-      res.status(200).json(d);
+      const pttn = q.pttn || 'A03';
+      const gRaw = await call(key, OP_GENERAL, q.sym, pttn);
+      const cRaw = await call(key, OP_CAPACITY, q.sym, pttn);
+      const d = await fetchDetail(key, q.sym, pttn);
+      res.status(200).json({
+        req: { sym: q.sym, pttn },
+        generalRaw: gRaw.text.slice(0, 700),
+        capacityRaw: cRaw.text.slice(0, 500),
+        mapped: d.mapped,
+      });
       return;
     }
 
