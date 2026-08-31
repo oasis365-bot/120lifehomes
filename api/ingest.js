@@ -81,10 +81,17 @@ export default async function handler(req, res) {
         const { count } = await sb(`facilities?select=id&sido=eq.${encodeURIComponent(s)}&limit=1`, { prefer: 'count=exact' });
         bySido[s] = count;
       }
-      const { data: sample } = await sb('facilities?select=type_code&limit=2000');
       const byType = {};
-      for (const r of sample || []) byType[r.type_code || 'null'] = (byType[r.type_code || 'null'] || 0) + 1;
-      res.status(200).json({ total, bySido, typeCodeSample: byType });
+      const byTypeLabel = {};
+      for (let off = 0; off < 30000; off += 1000) {
+        const { data } = await sb(`facilities?select=type_code,type_label&limit=1000&offset=${off}`);
+        if (!data || !data.length) break;
+        for (const r of data) {
+          byType[r.type_code || 'null'] = (byType[r.type_code || 'null'] || 0) + 1;
+          byTypeLabel[r.type_label || 'null'] = (byTypeLabel[r.type_label || 'null'] || 0) + 1;
+        }
+      }
+      res.status(200).json({ total, bySido, byType, byTypeLabel });
       return;
     }
 
