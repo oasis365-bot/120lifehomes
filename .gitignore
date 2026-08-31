@@ -29,3 +29,8 @@ desktop.ini
 
 # Vercel
 .vercel
+
+# data: 원본 파일은 제외, 가공된 .ndjson.gz 만 커밋
+data/*.xlsx
+data/*.csv
+data/*.xls

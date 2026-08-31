@@ -3,6 +3,9 @@
   "framework": null,
   "cleanUrls": true,
   "trailingSlash": false,
+  "functions": {
+    "api/import.js": { "includeFiles": "data/facilities_full.ndjson.gz" }
+  },
   "headers": [
     {
       "source": "/assets/(.*)",
