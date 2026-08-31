@@ -28,7 +28,8 @@ function parseItem(text) {
     const j = JSON.parse(text);
     const err = j?.OpenAPI_ServiceResponse?.cmmMsgHeader;
     if (err) return { err: err.returnAuthMsg };
-    let it = j?.response?.body?.items?.item ?? j?.response?.body?.items ?? null;
+    const body = j?.response?.body ?? {};
+    let it = body?.item ?? body?.items?.item ?? body?.items ?? null;
     if (Array.isArray(it)) it = it[0];
     return { item: it || null, code: j?.response?.header?.resultCode };
   } catch { /* xml */ }
@@ -48,7 +49,7 @@ async function fetchDetail(key, sym, pttn) {
   const c = parseItem((await call(key, OP_CAPACITY, sym, pttn)).text);
   const gi = g.item || {};
   const ci = c.item || {};
-  const tel = [gi.locTelNo1, gi.locTelNo2, gi.locTelNo3].map(x => String(x ?? '').trim()).filter(Boolean);
+  const tel = [gi.locTelNo_1, gi.locTelNo_2, gi.locTelNo_3].map(x => String(x ?? '').trim()).filter(Boolean);
   const cap = n(ci.totPer);
   const now = (n(ci.maNowPer) || 0) + (n(ci.fmNowPer) || 0);
   const wait = (n(ci.maRsvPer) || 0) + (n(ci.fmRsvPer) || 0);
@@ -117,12 +118,10 @@ export default async function handler(req, res) {
         const d = await fetchDetail(key, t.id, t.type_code || 'A03');
         const m = d.mapped;
         // 의미있는 값이 하나라도 있을 때만 업데이트
-        if (m.capacity != null || m.phone || m.post_no) {
+        if (m.capacity != null || m.phone) {
           const patch = { updated_at: new Date().toISOString() };
           if (m.phone) patch.phone = m.phone;
           if (m.capacity != null) { patch.capacity = m.capacity; patch.current_count = m.current_count; }
-          // 도로명주소 문자열은 코드→명칭 변환이 필요해 보류. 우편번호+상세주소만 address 에 임시 기록.
-          if (m.post_no) patch.address = `(우편 ${m.post_no})${m.detail_addr ? ' ' + m.detail_addr : ''}`;
           await sb(`facilities?id=eq.${encodeURIComponent(t.id)}`, {
             method: 'PATCH', prefer: 'return=minimal', body: patch,
           });
