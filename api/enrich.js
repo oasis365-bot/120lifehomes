@@ -55,10 +55,16 @@ async function callRetry(key, op, sym, pttn, tries = 3) {
   }
   return call(key, op, sym, pttn);
 }
+function isLimit(text) {
+  return /LIMITED_NUMBER|returnReasonCode":"22|<returnReasonCode>22</.test(text);
+}
 async function fetchDetail(key, sym, pttn) {
   const isResi = /^A0/.test(pttn || '');
-  const g = parseItem((await callRetry(key, OP_GENERAL, sym, pttn)).text);
-  const c = isResi ? parseItem((await callRetry(key, OP_CAPACITY, sym, pttn)).text) : { item: {} };
+  const gr = await callRetry(key, OP_GENERAL, sym, pttn);
+  const cr = isResi ? await callRetry(key, OP_CAPACITY, sym, pttn) : { text: '{}' };
+  const g = parseItem(gr.text);
+  const c = parseItem(cr.text);
+  const hitLimit = isLimit(gr.text) || (isResi && isLimit(cr.text));
   const gi = g.item || {};
   const ci = c.item || {};
   const tel = [gi.locTelNo_1, gi.locTelNo_2, gi.locTelNo_3].map(x => String(x ?? '').trim()).filter(Boolean);
@@ -66,7 +72,7 @@ async function fetchDetail(key, sym, pttn) {
   const now = (n(ci.maNowPer) || 0) + (n(ci.fmNowPer) || 0);
   const wait = (n(ci.maRsvPer) || 0) + (n(ci.fmRsvPer) || 0);
   return {
-    general: gi, capacity: ci,
+    general: gi, capacity: ci, hitLimit,
     mapped: {
       phone: tel.length === 3 ? tel.join('-') : (tel.join('') || null),
       post_no: String(gi.hmPostNo ?? '').trim() || null,
@@ -109,10 +115,10 @@ export default async function handler(req, res) {
     if (!haveDb()) { res.status(503).json({ error: 'db_not_configured' }); return; }
     const limit = Math.min(parseInt(q.limit, 10) || 100, 400);
 
-    // 아직 상세 미보강 기관 선택 (post_no 없음 = 상세조회 안 함)
+    // 아직 상세 미보강 기관 선택 (detail_synced_at 없음)
     const p = new URLSearchParams();
     p.set('select', 'id,type_code,sido');
-    p.append('post_no', 'is.null');
+    p.append('detail_synced_at', 'is.null');
     if (q.sido) p.append('sido', `eq.${q.sido}`);
     if (q.pttn) p.append('type_code', `eq.${q.pttn}`);
     p.append('order', 'id.asc');
@@ -133,17 +139,16 @@ export default async function handler(req, res) {
         processed += 1;
         try {
           const d = await fetchDetail(key, t.id, t.type_code || 'A03');
+          if (d.hitLimit) { errors += 1; return; } // 일일한도 소진 — 마킹하지 않고 다음 기회에
           const m = d.mapped;
-          if (m.capacity != null || m.phone || m.post_no) {
-            const patch = { updated_at: new Date().toISOString() };
-            if (m.phone) patch.phone = m.phone;
-            if (m.post_no) patch.post_no = m.post_no;
-            if (m.capacity != null) { patch.capacity = m.capacity; patch.current_count = m.current_count; }
-            await sb(`facilities?id=eq.${encodeURIComponent(t.id)}`, {
-              method: 'PATCH', prefer: 'return=minimal', body: patch,
-            });
-            updated += 1;
-          }
+          const patch = { updated_at: new Date().toISOString(), detail_synced_at: new Date().toISOString() };
+          if (m.phone) patch.phone = m.phone;
+          if (m.post_no) patch.post_no = m.post_no;
+          if (m.capacity != null) { patch.capacity = m.capacity; patch.current_count = m.current_count; }
+          await sb(`facilities?id=eq.${encodeURIComponent(t.id)}`, {
+            method: 'PATCH', prefer: 'return=minimal', body: patch,
+          });
+          if (m.phone || m.post_no || m.capacity != null) updated += 1;
         } catch (e) { errors += 1; }
       }));
       await sleep(250);
