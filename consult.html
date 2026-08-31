@@ -85,9 +85,9 @@
 <script>
   mountChrome("consult");
   const cRegion = document.getElementById("cRegion");
-  REGIONS.forEach(r => cRegion.add(new Option(r.name, r.code)));
+  REGIONS.forEach(r => cRegion.add(new Option(r.name, r.name)));
   const cType = document.getElementById("cType");
-  FACILITY_TYPES.forEach(t => cType.add(new Option(t.name, t.code)));
+  FACILITY_TYPES.forEach(t => cType.add(new Option(t.label, t.name)));
   const cLevel = document.getElementById("cLevel");
   CARE_LEVELS.forEach(l => cLevel.add(new Option(l.name, l.code)));
 

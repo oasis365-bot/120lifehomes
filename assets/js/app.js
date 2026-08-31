@@ -59,11 +59,11 @@ function mountChrome(activePage) {
         <p style="margin-top:10px">고객센터 <strong style="color:#fff">1600-0000</strong> (평일 09:00–18:00)</p>
       </div>
       <div><h4>시설 찾기</h4><ul>
-        <li><a href="search.html?type=nursing">노인요양시설</a></li>
-        <li><a href="search.html?type=grouphome">그룹홈</a></li>
-        <li><a href="search.html?type=daycare">주야간보호센터</a></li>
-        <li><a href="search.html?type=silvertown">실버타운</a></li>
-        <li><a href="search.html?type=hospital">요양병원</a></li>
+        <li><a href="search.html?type=%EB%85%B8%EC%9D%B8%EC%9A%94%EC%96%91%EC%8B%9C%EC%84%A4">노인요양시설(요양원)</a></li>
+        <li><a href="search.html?type=%EB%85%B8%EC%9D%B8%EC%9A%94%EC%96%91%EA%B3%B5%EB%8F%99%EC%83%9D%ED%99%9C%EA%B0%80%EC%A0%95">그룹홈</a></li>
+        <li><a href="search.html?type=%EC%A3%BC%EC%95%BC%EA%B0%84%EB%B3%B4%ED%98%B8">주야간보호</a></li>
+        <li><a href="search.html?type=%EB%B0%A9%EB%AC%B8%EC%9A%94%EC%96%91">방문요양</a></li>
+        <li><a href="search.html">전체 시설 검색</a></li>
       </ul></div>
       <div><h4>가이드</h4><ul>
         <li><a href="guide.html">장기요양등급 신청</a></li>
@@ -79,9 +79,9 @@ function mountChrome(activePage) {
       </ul></div>
     </div>
     <div class="disclaimer">
-      본 사이트는 일본 최대 요양시설 검색 사이트 <em>LIFULL 介護(kaigo.homes.co.jp)</em>의 정보 구조를 참고하여
-      한국 노인장기요양보험 제도에 맞게 재구성한 <strong>데모(포트폴리오) 프로젝트</strong>입니다.
-      게시된 시설명·주소·연락처·요금·후기는 모두 가상의 예시이며 실제 기관과 무관합니다.<br>
+      시설 정보는 <strong>국민건강보험공단</strong>이 공공데이터포털을 통해 제공하는 「장기요양기관 검색」 데이터를 기반으로 하며 매일 갱신됩니다.
+      상세 주소·정원·평가등급 등 일부 항목은 순차적으로 보강 중이며, 최신·정확한 정보는 해당 기관 또는
+      <em>국민건강보험공단(1577-1000)</em>에 확인하시기 바랍니다. 화면 구성은 일본 <em>LIFULL 介護</em>를 참고했습니다.<br>
       © 2026 120lifehomes (120 라이프홈즈). All rights reserved.
     </div>
   </div></footer>`;
@@ -94,28 +94,32 @@ function mountChrome(activePage) {
   }
 }
 
-/* ---------- 시설 카드 HTML ---------- */
+/* ---------- 시설 카드 HTML (공공데이터 기반) ---------- */
+const _typeColor = {
+  "노인요양시설": "#1f8a4c", "노인요양공동생활가정": "#5aa85a", "주야간보호": "#f47b20",
+  "단기보호": "#8367d8", "방문요양": "#3a9bd4", "방문간호": "#2f7fb5", "방문목욕": "#3f8f3f",
+  "복지용구": "#b5546a", "재가노인지원": "#6a7a8a",
+};
+function typeColor(t) { return _typeColor[t] || "#6a7a8a"; }
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
 function facilityCardHTML(f) {
-  const vac = f.type === "homecare"
-    ? `<span class="badge">상시 이용 가능</span>`
-    : (f.vacancy > 0
-        ? `<span class="badge">공실 ${f.vacancy}자리</span>`
-        : `<span class="badge full">대기 접수 중</span>`);
-  const feeLabel = (f.type === "daycare" || f.type === "homecare" || f.type === "respite")
-    ? "월 본인부담(예상)" : "월 이용료(예상)";
+  const c = typeColor(f.type_label);
+  const region = [f.sido].filter(Boolean).join(" ");
   return `
-  <a class="facility-card" href="facility.html?id=${f.id}">
-    <div class="thumb" style="background:linear-gradient(135deg,${f.color},${f.color}cc)">${vac}</div>
+  <a class="facility-card" href="facility.html?id=${encodeURIComponent(f.id)}">
+    <div class="thumb" style="background:linear-gradient(135deg,${c},${c}cc)">
+      <span class="badge" style="background:rgba(255,255,255,.9);color:${c}">${esc(f.type_label || "장기요양기관")}</span>
+    </div>
     <div class="body">
-      <div class="type-label">${typeName(f.type)}</div>
-      <h3>${f.name}</h3>
-      <div class="addr">${regionName(f.region)} ${f.city} · ${f.address}</div>
-      <div class="tags">${f.features.slice(0, 4).map(t => `<span>${t}</span>`).join("")}</div>
+      <div class="type-label">${esc(f.type_label || "장기요양기관")}</div>
+      <h3>${esc(f.name)}</h3>
+      <div class="addr">${esc(region)}${f.address ? " · " + esc(f.address) : ""}</div>
       <div class="meta">
-        <div>${feeLabel}<strong class="fee">${won(f.monthlyFee)}</strong></div>
-        <div>입소보증금<strong>${f.entryFee === 0 ? "없음" : won(f.entryFee)}</strong></div>
-        <div>이용 정원<strong>${f.capacity === 0 ? "재가" : f.capacity + "명"}</strong></div>
-        <div>이용자 평가<strong class="rating">★ ${f.rating.toFixed(1)} <small>(${f.reviews})</small></strong></div>
+        <div>지정일<strong>${f.established_at ? ymd(f.established_at) : "-"}</strong></div>
+        <div>전화<strong>${f.phone ? esc(f.phone) : "상세정보 준비중"}</strong></div>
+        <div>정원<strong>${f.capacity != null ? f.capacity + "명" : "준비중"}</strong></div>
+        <div>평가등급<strong>${f.eval_grade || "준비중"}</strong></div>
       </div>
     </div>
   </a>`;

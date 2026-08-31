@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>120 라이프홈즈 | 전국 요양시설·요양원·실버타운 검색</title>
-<meta name="description" content="전국 5만 곳 이상의 요양원, 그룹홈, 주야간보호센터, 실버타운, 요양병원을 지역·비용·요양등급으로 검색하세요. 무료 입소 상담 제공.">
+<title>120 라이프홈즈 | 전국 요양시설·장기요양기관 검색</title>
+<meta name="description" content="전국 2만 7천여 개 장기요양기관(요양원·그룹홈·주야간보호·방문요양)을 지역과 유형으로 검색하세요. 국민건강보험공단 공공데이터 기반. 무료 입소 상담 제공.">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/css/style.css">
@@ -15,39 +15,28 @@
 <main>
   <section class="hero">
     <div class="wrap">
-      <h1>우리 가족을 위한 요양시설,<br><span class="hl">전국 52,000곳</span>에서 찾아보세요</h1>
-      <p class="lead">지역, 월 이용료, 장기요양등급으로 조건에 맞는 요양원·그룹홈·주야간보호센터·실버타운을 한 번에 비교합니다.</p>
+      <h1>우리 가족을 위한 요양시설,<br><span class="hl">전국 27,000곳</span>에서 찾아보세요</h1>
+      <p class="lead">국민건강보험공단 공공데이터 기반으로 전국 장기요양기관을 지역·유형으로 검색합니다.</p>
       <div class="stat-row">
-        <div><strong>52,148</strong>등록 시설</div>
-        <div><strong>17개</strong>시도 전역</div>
+        <div><strong>27,728</strong>등록 기관</div>
+        <div><strong>15개</strong>시도 (광주·전남 준비중)</div>
         <div><strong>무료</strong>입소 상담</div>
       </div>
 
       <div class="searchbox">
         <h2>🔍 조건으로 시설 찾기</h2>
-        <form class="search-grid" action="search.html" method="get">
+        <form class="search-grid" action="search.html" method="get" style="grid-template-columns:1fr 1fr 1fr">
           <div class="field">
-            <label for="region">지역</label>
-            <select id="region" name="region"><option value="">전체 지역</option></select>
+            <label for="sido">지역</label>
+            <select id="sido" name="sido"><option value="">전체 지역</option></select>
           </div>
           <div class="field">
             <label for="type">시설 유형</label>
             <select id="type" name="type"><option value="">전체 유형</option></select>
           </div>
           <div class="field">
-            <label for="level">장기요양등급</label>
-            <select id="level" name="level"><option value="">등급 선택 안 함</option></select>
-          </div>
-          <div class="field">
-            <label for="fee">월 이용료</label>
-            <select id="fee" name="fee">
-              <option value="">상관없음</option>
-              <option value="50">50만 원 이하</option>
-              <option value="100">100만 원 이하</option>
-              <option value="150">150만 원 이하</option>
-              <option value="200">200만 원 이하</option>
-              <option value="300">300만 원 이하</option>
-            </select>
+            <label for="q">기관명</label>
+            <input id="q" name="q" type="text" placeholder="예) 행복요양원">
           </div>
           <div class="search-actions" style="grid-column:1/-1">
             <button type="submit" class="btn btn-primary btn-lg">시설 검색</button>
@@ -75,15 +64,15 @@
 
   <section class="block">
     <div class="wrap">
-      <div class="section-head"><h2>테마별 특집</h2></div>
+      <div class="section-head"><h2>유형별 바로가기</h2></div>
       <div class="collection-grid" id="collectionGrid"></div>
     </div>
   </section>
 
   <section class="block alt">
     <div class="wrap">
-      <div class="section-head"><h2>새로 등록된 시설</h2><a class="more" href="search.html">더 보기 →</a></div>
-      <div class="facility-list" id="newFacilities"></div>
+      <div class="section-head"><h2>최근 지정된 기관</h2><a class="more" href="search.html?sort=new">더 보기 →</a></div>
+      <div class="facility-list" id="newFacilities"><p style="color:var(--gray)">불러오는 중…</p></div>
     </div>
   </section>
 
@@ -102,50 +91,47 @@
 <script>
   mountChrome("");
 
-  // 셀렉트 채우기
-  const rSel = document.getElementById("region");
-  REGIONS.forEach(r => rSel.add(new Option(`${r.name} (${r.count.toLocaleString()})`, r.code)));
+  const sSel = document.getElementById("sido");
+  REGIONS.forEach(r => sSel.add(new Option(r.count ? `${r.name} (${r.count.toLocaleString()})` : `${r.name} (준비중)`, r.name)));
   const tSel = document.getElementById("type");
-  FACILITY_TYPES.forEach(t => tSel.add(new Option(t.name, t.code)));
-  const lSel = document.getElementById("level");
-  CARE_LEVELS.forEach(l => lSel.add(new Option(l.name, l.code)));
+  FACILITY_TYPES.forEach(t => tSel.add(new Option(t.label, t.name)));
 
-  // 인기 검색 태그
   const qt = document.getElementById("quickTags");
-  [["입소금 0원", "search.html?feature=" + encodeURIComponent("입소금 없음")],
-   ["치매 전담 케어", "search.html?type=dementia"],
-   ["주야간보호센터", "search.html?type=daycare"],
-   ["반려동물 동반", "search.html?feature=" + encodeURIComponent("반려동물 동반")],
-   ["실버타운", "search.html?type=silvertown"]].forEach(([label, href]) => {
-    const a = document.createElement("a"); a.href = href; a.textContent = label; qt.appendChild(a);
+  [["요양원", "노인요양시설"], ["그룹홈", "노인요양공동생활가정"], ["주야간보호", "주야간보호"],
+   ["방문요양", "방문요양"], ["단기보호", "단기보호"]].forEach(([label, type]) => {
+    const a = document.createElement("a");
+    a.href = "search.html?type=" + encodeURIComponent(type);
+    a.textContent = label; qt.appendChild(a);
   });
 
-  // 지역 그리드
   document.getElementById("regionGrid").innerHTML = REGIONS.map(r =>
-    `<a href="search.html?region=${r.code}">${r.name}<small>${r.count.toLocaleString()}곳</small></a>`).join("");
+    `<a href="search.html?sido=${encodeURIComponent(r.name)}">${r.name}<small>${r.count ? r.count.toLocaleString() + "곳" : "준비중"}</small></a>`).join("");
 
-  // 유형 그리드
-  document.getElementById("typeGrid").innerHTML = FACILITY_TYPES.slice(0, 9).map(t =>
-    `<a class="type-card" href="search.html?type=${t.code}">
-       <div class="ico">${t.icon}</div><h3>${t.name}</h3><p>${t.desc}</p>
+  document.getElementById("typeGrid").innerHTML = FACILITY_TYPES.map(t =>
+    `<a class="type-card" href="search.html?type=${encodeURIComponent(t.name)}">
+       <div class="ico">${t.icon}</div><h3>${t.label}</h3><p>${t.desc}</p>
      </a>`).join("");
 
-  // 컬렉션
   document.getElementById("collectionGrid").innerHTML = COLLECTIONS.map(c => {
     const i = c.q.indexOf("=");
     const href = "search.html?" + c.q.slice(0, i) + "=" + encodeURIComponent(c.q.slice(i + 1));
     return `<a class="collection-card" style="background:linear-gradient(135deg,${c.c1},${c.c2})" href="${href}">
-       <h3>${c.title}</h3><p>${c.desc}</p>
-     </a>`;
+       <h3>${c.title}</h3><p>${c.desc}</p></a>`;
   }).join("");
 
-  // 새 시설 (3개)
-  document.getElementById("newFacilities").innerHTML =
-    FACILITIES.filter(f => ["f09", "f04", "f11"].includes(f.id)).map(facilityCardHTML).join("");
-
-  // FAQ
   document.getElementById("faqList").innerHTML = FAQS.map(f =>
     `<details class="faq-item"><summary>${f.q}</summary><div class="ans">${f.a}</div></details>`).join("");
+
+  // 최근 지정된 기관
+  fetch("/api/facilities?sort=new&size=3")
+    .then(r => r.json())
+    .then(d => {
+      const el = document.getElementById("newFacilities");
+      el.innerHTML = (d.items && d.items.length)
+        ? d.items.map(facilityCardHTML).join("")
+        : `<p style="color:var(--gray)">준비 중입니다.</p>`;
+    })
+    .catch(() => { document.getElementById("newFacilities").innerHTML = ""; });
 </script>
 </body>
 </html>
