@@ -52,7 +52,7 @@ export default async function handler(req, res) {
     let r;
     try { r = JSON.parse(ln); } catch { continue; }
     if (!r.id || !r.name) continue;
-    const row = {
+    rows.push({
       id: r.id,
       name: r.name,
       sido: SIDO_SHORT[r.sido] || r.sido || null,
@@ -61,14 +61,13 @@ export default async function handler(req, res) {
       address: r.address || null,
       post_no: r.post_no || null,
       established_at: r.established_at || null,
+      type_code: r.type_code || null,
+      type_label: r.type_label || null,
+      capacity: r.capacity != null ? r.capacity : null,
+      eval_grade: r.eval_grade || null,
+      eval_date: r.eval_date || null,
       updated_at: new Date().toISOString(),
-    };
-    if (r.type_code) row.type_code = r.type_code;
-    if (r.type_label) row.type_label = r.type_label;
-    if (r.capacity != null) row.capacity = r.capacity;
-    if (r.eval_grade) row.eval_grade = r.eval_grade;
-    if (r.eval_date) row.eval_date = r.eval_date;
-    rows.push(row);
+    });
   }
 
   try {
