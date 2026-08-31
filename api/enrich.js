@@ -44,9 +44,20 @@ function parseItem(text) {
 
 function n(v) { const x = parseInt(String(v ?? '').replace(/[^\d-]/g, ''), 10); return Number.isFinite(x) ? x : null; }
 
+function throttled(text) {
+  return /REQUESTS_PER_SECOND|returnReasonCode":"23|<returnReasonCode>23</.test(text);
+}
+async function callRetry(key, op, sym, pttn, tries = 3) {
+  for (let i = 0; i < tries; i++) {
+    const r = await call(key, op, sym, pttn);
+    if (!throttled(r.text)) return r;
+    await sleep(400 + i * 500 + Math.random() * 300);
+  }
+  return call(key, op, sym, pttn);
+}
 async function fetchDetail(key, sym, pttn) {
-  const g = parseItem((await call(key, OP_GENERAL, sym, pttn)).text);
-  const c = parseItem((await call(key, OP_CAPACITY, sym, pttn)).text);
+  const g = parseItem((await callRetry(key, OP_GENERAL, sym, pttn)).text);
+  const c = parseItem((await callRetry(key, OP_CAPACITY, sym, pttn)).text);
   const gi = g.item || {};
   const ci = c.item || {};
   const tel = [gi.locTelNo_1, gi.locTelNo_2, gi.locTelNo_3].map(x => String(x ?? '').trim()).filter(Boolean);
@@ -113,9 +124,9 @@ export default async function handler(req, res) {
 
     const started = Date.now();
     let updated = 0, errors = 0, processed = 0;
-    const CONCURRENCY = 8;
+    const CONCURRENCY = 4; // 초당 30tps 한도 고려
     for (let i = 0; i < targets.length; i += CONCURRENCY) {
-      if (Date.now() - started > 50000) break;
+      if (Date.now() - started > 48000) break;
       const slice = targets.slice(i, i + CONCURRENCY);
       await Promise.all(slice.map(async (t) => {
         processed += 1;
@@ -133,6 +144,7 @@ export default async function handler(req, res) {
           }
         } catch (e) { errors += 1; }
       }));
+      await sleep(250);
     }
     res.status(200).json({ ok: true, picked: targets.length, processed, updated, errors, elapsedMs: Date.now() - started });
   } catch (e) {
