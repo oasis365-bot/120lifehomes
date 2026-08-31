@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>관리자 — 상담 접수</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Noto Sans KR', sans-serif; background: #f5f7f8; color: #23292e; padding: 24px; }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin-bottom: 4px; }
+  .sub { color: #5b6670; font-size: .9rem; margin-bottom: 20px; }
+  .gate { max-width: 340px; margin: 80px auto; background: #fff; border: 1px solid #e2e6ea; border-radius: 12px; padding: 28px; text-align: center; }
+  .gate input { width: 100%; padding: 12px; border: 1px solid #e2e6ea; border-radius: 8px; margin: 14px 0; font-family: inherit; }
+  button { font-family: inherit; cursor: pointer; }
+  .btn { background: #1f8a4c; color: #fff; border: 0; border-radius: 8px; padding: 11px 20px; font-weight: 700; }
+  .btn.ghost { background: #fff; color: #1f8a4c; border: 1px solid #1f8a4c; }
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  .toolbar select { padding: 8px; border: 1px solid #e2e6ea; border-radius: 8px; font-family: inherit; }
+  .count { font-weight: 700; color: #1f8a4c; }
+  table { width: 100%; background: #fff; border-collapse: collapse; border: 1px solid #e2e6ea; border-radius: 12px; overflow: hidden; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eef1f3; font-size: .9rem; vertical-align: top; }
+  th { background: #f0f4f2; font-size: .82rem; color: #5b6670; }
+  tr:hover td { background: #fafbfb; }
+  .st { padding: 3px 9px; border-radius: 999px; font-size: .78rem; font-weight: 700; }
+  .st.new { background: #fde8d5; color: #d9660f; }
+  .st.contacted { background: #d8ecff; color: #2f7fb5; }
+  .st.done { background: #e8f5ec; color: #1f8a4c; }
+  .st.spam { background: #eee; color: #888; }
+  td select { padding: 5px; border: 1px solid #e2e6ea; border-radius: 6px; font-family: inherit; font-size: .82rem; }
+  .memo { white-space: pre-wrap; color: #5b6670; max-width: 280px; }
+  .empty { text-align: center; padding: 40px; color: #5b6670; }
+  @media (max-width: 720px) { table, thead, tbody, th, td, tr { display: block; } th { display: none; } td { border: 0; padding: 4px 12px; } tr { border-bottom: 2px solid #e2e6ea; padding: 10px 0; } }
+</style>
+</head>
+<body>
+
+<div id="gate" class="gate">
+  <h1>관리자 로그인</h1>
+  <p style="color:#5b6670;font-size:.88rem;margin-top:8px">접근 키를 입력하세요.</p>
+  <input id="key" type="password" placeholder="접근 키" onkeydown="if(event.key==='Enter')enter()">
+  <button class="btn" style="width:100%" onclick="enter()">확인</button>
+  <p id="gateErr" style="color:#c0392b;font-size:.85rem;margin-top:10px;display:none">키가 올바르지 않습니다.</p>
+</div>
+
+<div id="app" class="wrap" style="display:none">
+  <h1>상담 접수 관리</h1>
+  <div class="sub">120 라이프홈즈 · 무료 입소 상담 신청 내역</div>
+
+  <div class="toolbar">
+    <label>상태
+      <select id="filter" onchange="load()">
+        <option value="">전체</option>
+        <option value="new">신규</option>
+        <option value="contacted">연락함</option>
+        <option value="done">완료</option>
+        <option value="spam">스팸</option>
+      </select>
+    </label>
+    <button class="btn ghost" onclick="load()">새로고침</button>
+    <span style="margin-left:auto">총 <span class="count" id="count">0</span>건</span>
+    <button class="btn ghost" onclick="logout()">로그아웃</button>
+  </div>
+
+  <table>
+    <thead><tr>
+      <th>접수일시</th><th>상태</th><th>성함</th><th>연락처</th><th>관계</th>
+      <th>지역</th><th>희망유형</th><th>등급</th><th>예산</th><th>관심시설</th><th>메모</th>
+    </tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div id="empty" class="empty" style="display:none">접수 내역이 없습니다.</div>
+</div>
+
+<script>
+  const API = "/api/admin/consultations";
+  let KEY = sessionStorage.getItem("ch-admin-key") || "";
+
+  if (KEY) { document.getElementById("gate").style.display = "none"; document.getElementById("app").style.display = "block"; load(); }
+
+  async function enter() {
+    KEY = document.getElementById("key").value.trim();
+    if (!KEY) return;
+    const r = await fetch(`${API}?key=${encodeURIComponent(KEY)}`);
+    if (r.status === 401) { document.getElementById("gateErr").style.display = "block"; return; }
+    sessionStorage.setItem("ch-admin-key", KEY);
+    document.getElementById("gate").style.display = "none";
+    document.getElementById("app").style.display = "block";
+    load();
+  }
+  function logout() { sessionStorage.removeItem("ch-admin-key"); location.reload(); }
+
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+  const STLABEL = { new: "신규", contacted: "연락함", done: "완료", spam: "스팸" };
+
+  async function load() {
+    const f = document.getElementById("filter").value;
+    const r = await fetch(`${API}?key=${encodeURIComponent(KEY)}${f ? "&status=" + f : ""}`);
+    if (!r.ok) { if (r.status === 401) logout(); return; }
+    const { items } = await r.json();
+    document.getElementById("count").textContent = items.length;
+    document.getElementById("empty").style.display = items.length ? "none" : "block";
+    document.getElementById("rows").innerHTML = items.map(rowHTML).join("");
+  }
+
+  function rowHTML(c) {
+    const dt = new Date(c.created_at).toLocaleString("ko-KR", { dateStyle: "short", timeStyle: "short" });
+    const opts = ["new", "contacted", "done", "spam"].map(s =>
+      `<option value="${s}"${s === c.status ? " selected" : ""}>${STLABEL[s]}</option>`).join("");
+    return `<tr>
+      <td>${dt}</td>
+      <td><span class="st ${c.status}">${STLABEL[c.status] || c.status}</span><br>
+          <select onchange="setStatus(${c.id}, this.value)">${opts}</select></td>
+      <td>${esc(c.name)}</td>
+      <td>${esc(c.phone)}</td>
+      <td>${esc(c.relation)}</td>
+      <td>${esc(c.region)}</td>
+      <td>${esc(c.facility_type)}</td>
+      <td>${esc(c.care_level)}</td>
+      <td>${esc(c.budget)}</td>
+      <td>${esc(c.facility_name)}</td>
+      <td class="memo">${esc(c.memo)}</td>
+    </tr>`;
+  }
+
+  async function setStatus(id, status) {
+    await fetch(`${API}?key=${encodeURIComponent(KEY)}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, status }),
+    });
+    load();
+  }
+  window.enter = enter; window.logout = logout; window.load = load; window.setStatus = setStatus;
+</script>
+</body>
+</html>

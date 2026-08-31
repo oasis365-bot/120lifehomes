@@ -75,12 +75,12 @@ header.site {
   background: #fff; border-bottom: 1px solid var(--line);
   position: sticky; top: 0; z-index: 50;
 }
-header.site .wrap { display: flex; align-items: center; gap: 28px; height: 74px; }
-.logo { display: flex; align-items: center; gap: 12px; }
-.logo .logo-img { height: 46px; width: auto; display: block; }
+header.site .wrap { display: flex; align-items: center; gap: 26px; height: 80px; }
+.logo { display: flex; align-items: center; gap: 13px; }
+.logo .logo-img { height: 40px; width: auto; display: block; }
 .logo .logo-tag {
-  font-size: .78rem; font-weight: 600; color: var(--gray); line-height: 1.35;
-  letter-spacing: .01em; border-left: 1px solid var(--line); padding-left: 12px;
+  font-size: .8rem; font-weight: 700; color: var(--ink); line-height: 1.3;
+  letter-spacing: .01em; border-left: 2px solid var(--green); padding-left: 13px;
 }
 
 nav.main { margin-left: auto; }
