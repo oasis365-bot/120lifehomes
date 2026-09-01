@@ -66,10 +66,10 @@ function mountChrome(activePage) {
         <li><a href="search.html">전체 시설 검색</a></li>
       </ul></div>
       <div><h4>가이드</h4><ul>
-        <li><a href="guide.html">장기요양등급 신청</a></li>
-        <li><a href="guide.html">비용·지원 제도</a></li>
-        <li><a href="guide.html">시설 견학 체크리스트</a></li>
-        <li><a href="guide.html">치매 돌봄</a></li>
+        <li><a href="guide-grade.html">장기요양등급 신청</a></li>
+        <li><a href="guide-cost.html">비용·지원 제도</a></li>
+        <li><a href="guide-checklist.html">시설 견학 체크리스트</a></li>
+        <li><a href="guide-dementia.html">치매 돌봄</a></li>
       </ul></div>
       <div><h4>회사</h4><ul>
         <li><a href="about.html">회사 소개</a></li>
@@ -113,7 +113,7 @@ const _typeEmoji = {
 function typeEmoji(t) { return _typeEmoji[t] || "🏢"; }
 
 /* 유형 → 브랜드 일러스트/아이콘 파일 슬러그 */
-const ASSET_V = "20260901f";
+const ASSET_V = "20260901g";
 const _typeSlug = {
   "노인요양시설": "nursing", "노인요양공동생활가정": "group", "주야간보호": "daycare",
   "단기보호": "short", "방문요양": "homecare", "방문간호": "nurse", "방문목욕": "bath",
@@ -173,6 +173,19 @@ function facilityCardHTML(f) {
       </div>
     </div>
   </a>`;
+}
+
+/* ---------- 가이드 상세 페이지: 다른 가이드 링크 ---------- */
+function renderGuideMore(currentHref) {
+  const el = document.getElementById("guide-more");
+  if (!el || typeof GUIDES === "undefined") return;
+  const others = GUIDES.filter(g => g.href && g.href !== currentHref);
+  el.innerHTML = `
+    <h2>다른 주제별 가이드</h2>
+    <ul>
+      ${others.map(g => `<li><a href="${g.href}">${esc(g.title)}</a> <span style="color:var(--gray)">— ${esc(g.cat)}</span></li>`).join("")}
+    </ul>
+    <p style="margin-top:14px"><a href="guide.html">← 돌봄 가이드 전체 보기</a></p>`;
 }
 
 /* ---------- 쿼리스트링 ---------- */
