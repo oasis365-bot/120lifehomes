@@ -113,7 +113,7 @@ const _typeEmoji = {
 function typeEmoji(t) { return _typeEmoji[t] || "🏢"; }
 
 /* 유형 → 브랜드 일러스트/아이콘 파일 슬러그 */
-const ASSET_V = "20260901e";
+const ASSET_V = "20260901f";
 const _typeSlug = {
   "노인요양시설": "nursing", "노인요양공동생활가정": "group", "주야간보호": "daycare",
   "단기보호": "short", "방문요양": "homecare", "방문간호": "nurse", "방문목욕": "bath",
