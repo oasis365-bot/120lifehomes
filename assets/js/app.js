@@ -72,17 +72,22 @@ function mountChrome(activePage) {
         <li><a href="guide.html">치매 돌봄</a></li>
       </ul></div>
       <div><h4>회사</h4><ul>
-        <li><a href="#">회사 소개</a></li>
-        <li><a href="#">시설 등록 문의</a></li>
-        <li><a href="#">채용</a></li>
-        <li><a href="#">이용약관 · 개인정보처리방침</a></li>
+        <li><a href="about.html">회사 소개</a></li>
+        <li><a href="consult.html">시설 등록·제휴 문의</a></li>
+        <li><a href="terms.html">이용약관</a></li>
+        <li><a href="privacy.html"><strong>개인정보처리방침</strong></a></li>
       </ul></div>
     </div>
     <div class="disclaimer">
-      시설 정보는 <strong>국민건강보험공단</strong>이 공공데이터포털을 통해 제공하는 「장기요양기관 검색」 데이터를 기반으로 하며 매일 갱신됩니다.
-      상세 주소·정원·평가등급 등 일부 항목은 순차적으로 보강 중이며, 최신·정확한 정보는 해당 기관 또는
+      <p style="margin-bottom:10px">
+        <strong style="color:#fff">트로피컬리퍼블릭 주식회사</strong> &nbsp;|&nbsp; 사업자등록번호 120-87-70572 &nbsp;|&nbsp;
+        대표 <span style="color:#8a949c">[대표자명]</span> &nbsp;|&nbsp; 통신판매업신고 <span style="color:#8a949c">[신고번호]</span><br>
+        서울특별시 강남구 테헤란로63길 12, B-322 &nbsp;|&nbsp; 고객센터 1600-0000 (평일 09:00–18:00)
+      </p>
+      시설 정보는 <strong>국민건강보험공단</strong>이 공공데이터포털을 통해 제공하는 「장기요양기관」 데이터를 기반으로 하며 매일 갱신됩니다.
+      전화·정원·평가등급 등 일부 항목은 순차 보강 중이며, 최신·정확한 정보는 해당 기관 또는
       <em>국민건강보험공단(1577-1000)</em>에 확인하시기 바랍니다. 화면 구성은 일본 <em>LIFULL 介護</em>를 참고했습니다.<br>
-      © 2026 120lifehomes (120 라이프홈즈). All rights reserved.
+      © 2026 트로피컬리퍼블릭㈜ · 120 라이프홈즈. All rights reserved.
     </div>
   </div></footer>`;
 

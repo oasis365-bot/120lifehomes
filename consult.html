@@ -7,7 +7,7 @@
 <meta name="description" content="요양 상담 전문가가 조건에 맞는 요양시설을 무료로 추천하고, 공실 확인과 견학 예약을 도와드립니다.">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/css/style.css?v=20260831j">
+<link rel="stylesheet" href="assets/css/style.css?v=20260901a">
 </head>
 <body style="font-family:'Noto Sans KR',sans-serif">
 <div id="chrome-header"></div>
@@ -63,7 +63,8 @@
         <div class="field"><label>남기실 말씀</label><textarea name="memo" rows="3" placeholder="어르신 상태, 퇴원 예정일 등 자유롭게 적어 주세요"></textarea></div>
         <input type="text" name="company" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
         <label class="opt" style="display:flex;gap:8px;align-items:flex-start;font-size:.85rem;color:var(--gray)">
-          <input type="checkbox" required style="margin-top:4px"> 개인정보 수집·이용(상담 목적, 6개월 보관)에 동의합니다.
+          <input type="checkbox" required style="margin-top:4px"> <span>[필수] 개인정보 수집·이용 및 상담 목적의 요양시설 제공에 동의합니다.
+          자세한 내용은 <a href="privacy.html" target="_blank" style="color:var(--green);font-weight:700">개인정보처리방침</a>을 확인하세요.</span>
         </label>
         <button type="submit" class="btn btn-primary btn-block btn-lg" style="margin-top:14px">무료 상담 신청</button>
         <p class="form-note" id="formNote">상담은 무료이며, 입력하신 정보는 상담 목적으로만 이용됩니다.</p>
@@ -80,8 +81,8 @@
 
 <div id="chrome-footer"></div>
 
-<script src="assets/js/data.js?v=20260831j"></script>
-<script src="assets/js/app.js?v=20260831j"></script>
+<script src="assets/js/data.js?v=20260901a"></script>
+<script src="assets/js/app.js?v=20260901a"></script>
 <script>
   mountChrome("consult");
   const cRegion = document.getElementById("cRegion");
