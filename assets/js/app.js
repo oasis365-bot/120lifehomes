@@ -86,7 +86,7 @@ function mountChrome(activePage) {
       </p>
       시설 정보는 <strong>국민건강보험공단</strong>이 공공데이터포털을 통해 제공하는 「장기요양기관」 데이터를 기반으로 하며 매일 갱신됩니다.
       전화·정원·평가등급 등 일부 항목은 순차 보강 중이며, 최신·정확한 정보는 해당 기관 또는
-      <em>국민건강보험공단(1577-1000)</em>에 확인하시기 바랍니다. 화면 구성은 일본 <em>LIFULL 介護</em>를 참고했습니다.<br>
+      <em>국민건강보험공단(1577-1000)</em>에 확인하시기 바랍니다.<br>
       © 2026 트로피컬리퍼블릭㈜ · 120 라이프홈즈. All rights reserved.
     </div>
   </div></footer>`;
@@ -113,7 +113,7 @@ const _typeEmoji = {
 function typeEmoji(t) { return _typeEmoji[t] || "🏢"; }
 
 /* 유형 → 브랜드 일러스트/아이콘 파일 슬러그 */
-const ASSET_V = "20260901g";
+const ASSET_V = "20260901h";
 const _typeSlug = {
   "노인요양시설": "nursing", "노인요양공동생활가정": "group", "주야간보호": "daycare",
   "단기보호": "short", "방문요양": "homecare", "방문간호": "nurse", "방문목욕": "bath",
