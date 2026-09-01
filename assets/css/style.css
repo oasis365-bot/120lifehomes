@@ -182,12 +182,12 @@ section.block.alt { background: #fff; }
 .facility-card .thumb .badge.full { background: var(--gray); }
 .facility-card .thumb .t-emoji {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  font-size: 3.4rem; line-height: 1; opacity: .92;
-  filter: drop-shadow(0 3px 6px rgba(0,0,0,.18));
+  font-size: 3.4rem; line-height: 1; opacity: .95; z-index: 2;
+  filter: drop-shadow(0 3px 7px rgba(0,0,0,.22));
 }
 .facility-card .thumb .t-mark {
-  position: absolute; right: 11px; top: 11px; width: 30px; height: 30px; z-index: 2;
-  opacity: .4; filter: brightness(0) invert(1);
+  position: absolute; right: -14px; bottom: -18px; width: 96px; height: 96px; z-index: 1;
+  opacity: .16; filter: brightness(0) invert(1);
 }
 .facility-card .thumb::after {
   content: ""; position: absolute; inset: 0;
