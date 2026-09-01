@@ -118,8 +118,8 @@ function cleanName(s) {
   let n = String(s == null ? "" : s).replace(/["'“”‘’`]/g, "");
   for (let i = 0; i < 5; i++) {
     const before = n;
-    n = n.replace(/^\s*\([^()]{1,6}\)\s*/, "");                     // (A) (1) (AA+1) (+참편한) 등 짧은 괄호 접두
-    n = n.replace(/^[\s·.\-_+*~!#^@=\/\\|]+/, "");                  // 앞머리 기호
+    n = n.replace(/^\s*[([][^()[\]]{1,6}[)\]]\s*/, "");             // (A) [1] (AA+1) (+참편한) 등 짧은 괄호 접두
+    n = n.replace(/^[\s·.\-_+*~!#^@=?&%$()[\]{}<>|/\\"']+/, "");     // 앞머리 기호
     if (n === before) break;
   }
   n = n.replace(/\s{2,}/g, " ").trim();
