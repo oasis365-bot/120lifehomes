@@ -106,6 +106,11 @@ const _typeColor = {
   "복지용구": "#b5546a", "재가노인지원": "#6a7a8a",
 };
 function typeColor(t) { return _typeColor[t] || "#6a7a8a"; }
+const _typeEmoji = {
+  "노인요양시설": "🏥", "노인요양공동생활가정": "🏡", "주야간보호": "☀️", "단기보호": "🗓️",
+  "방문요양": "🤝", "방문간호": "💉", "방문목욕": "🛁", "복지용구": "🦽", "재가노인지원": "🧡",
+};
+function typeEmoji(t) { return _typeEmoji[t] || "🏢"; }
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
 // 등록명 앞에 붙은 정렬용 기호 제거 (검색은 원본으로 유지, 표시만 정리)
@@ -137,6 +142,8 @@ function facilityCardHTML(f) {
   return `
   <a class="facility-card" href="facility.html?id=${encodeURIComponent(f.id)}">
     <div class="thumb" style="background:linear-gradient(135deg,${c},${c}cc)">
+      <span class="t-emoji">${typeEmoji(f.type_label)}</span>
+      <img class="t-mark" src="assets/symbol.svg?v=1" alt="" loading="lazy">
       <span class="badge" style="background:rgba(255,255,255,.92);color:${c}">${esc(f.type_label || "장기요양기관")}</span>
     </div>
     <div class="body">

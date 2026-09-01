@@ -6,7 +6,7 @@
 <title>시설 상세 | 120 라이프홈즈</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/css/style.css?v=20260901a">
+<link rel="stylesheet" href="assets/css/style.css?v=20260901b">
 </head>
 <body style="font-family:'Noto Sans KR',sans-serif">
 <div id="chrome-header"></div>
@@ -15,9 +15,9 @@
 
 <div id="chrome-footer"></div>
 
-<script src="assets/js/regioncodes.js?v=20260901a"></script>
-<script src="assets/js/data.js?v=20260901a"></script>
-<script src="assets/js/app.js?v=20260901a"></script>
+<script src="assets/js/regioncodes.js?v=20260901b"></script>
+<script src="assets/js/data.js?v=20260901b"></script>
+<script src="assets/js/app.js?v=20260901b"></script>
 <script>
   mountChrome("");
   const id = qs().id;
@@ -59,10 +59,14 @@
     <div class="wrap"><div class="detail-grid">
       <div class="detail-main">
         <div class="gallery">
-          <div style="background:linear-gradient(135deg,${c},${c}bb)"></div>
+          <div style="background:linear-gradient(135deg,${c},${c}bb);position:relative;display:flex;align-items:center;justify-content:center">
+            <span style="font-size:5rem;filter:drop-shadow(0 4px 8px rgba(0,0,0,.2))">${typeEmoji(f.type_label)}</span>
+            <img src="assets/symbol.svg?v=1" alt="" style="position:absolute;right:16px;top:16px;width:44px;opacity:.4;filter:brightness(0) invert(1)">
+          </div>
           <div style="background:${c}88"></div><div style="background:${c}66"></div>
           <div style="background:${c}aa"></div><div style="background:${c}55"></div>
         </div>
+        <p style="font-size:.8rem;color:var(--gray);margin:-14px 0 20px">시설 실제 사진은 제휴 시 제공됩니다. 현재는 유형 이미지로 표시됩니다.</p>
 
         <div class="detail-section">
           <h2>기본 정보</h2>
