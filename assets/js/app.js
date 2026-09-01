@@ -111,6 +111,18 @@ const _typeEmoji = {
   "방문요양": "🤝", "방문간호": "💉", "방문목욕": "🛁", "복지용구": "🦽", "재가노인지원": "🧡",
 };
 function typeEmoji(t) { return _typeEmoji[t] || "🏢"; }
+
+/* 유형 → 브랜드 일러스트/아이콘 파일 슬러그 */
+const ASSET_V = "20260901e";
+const _typeSlug = {
+  "노인요양시설": "nursing", "노인요양공동생활가정": "group", "주야간보호": "daycare",
+  "단기보호": "short", "방문요양": "homecare", "방문간호": "nurse", "방문목욕": "bath",
+  "복지용구": "welfare", "재가노인지원": "homecare",
+};
+function typeSlug(t) { return _typeSlug[t] || "nursing"; }
+function typeImg(t) { return `assets/media/illus/${typeSlug(t)}.jpg?v=${ASSET_V}`; }
+function typeIcon(t) { return `assets/media/icon/${typeSlug(t)}.png?v=${ASSET_V}`; }
+
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
 // 등록명 앞에 붙은 정렬용 기호 제거 (검색은 원본으로 유지, 표시만 정리)
@@ -141,9 +153,8 @@ function facilityCardHTML(f) {
   const addrShort = f.address || region;
   return `
   <a class="facility-card" href="facility.html?id=${encodeURIComponent(f.id)}">
-    <div class="thumb" style="background:linear-gradient(135deg,${c},${c}cc)">
-      <span class="t-emoji">${typeEmoji(f.type_label)}</span>
-      <img class="t-mark" src="assets/symbol.svg?v=1" alt="" loading="lazy">
+    <div class="thumb">
+      <img class="t-photo" src="${typeImg(f.type_label)}" alt="" loading="lazy">
       <span class="badge" style="background:rgba(255,255,255,.92);color:${c}">${esc(f.type_label || "장기요양기관")}</span>
     </div>
     <div class="body">
