@@ -113,7 +113,7 @@ const _typeEmoji = {
 function typeEmoji(t) { return _typeEmoji[t] || "🏢"; }
 
 /* 유형 → 브랜드 일러스트/아이콘 파일 슬러그 */
-const ASSET_V = "20260901h";
+const ASSET_V = "20260901i";
 const _typeSlug = {
   "노인요양시설": "nursing", "노인요양공동생활가정": "group", "주야간보호": "daycare",
   "단기보호": "short", "방문요양": "homecare", "방문간호": "nurse", "방문목욕": "bath",
@@ -147,7 +147,6 @@ function gradeBadge(g) {
   return `<span style="display:inline-block;background:${col};color:#fff;border-radius:5px;padding:1px 7px;font-size:.82rem;font-weight:800">평가 ${g}</span>`;
 }
 function facilityCardHTML(f) {
-  const c = typeColor(f.type_label);
   const region = [f.sido, sgName(f), f.dong_nm].filter(Boolean).join(" ");
   const isResidential = ["노인요양시설", "노인요양공동생활가정"].includes(f.type_label);
   const addrShort = f.address || region;
@@ -155,7 +154,6 @@ function facilityCardHTML(f) {
   <a class="facility-card" href="facility.html?id=${encodeURIComponent(f.id)}">
     <div class="thumb">
       <img class="t-photo" src="${typeImg(f.type_label)}" alt="" loading="lazy">
-      <span class="badge" style="background:rgba(255,255,255,.92);color:${c}">${esc(f.type_label || "장기요양기관")}</span>
     </div>
     <div class="body">
       <div class="type-label">${esc(f.type_label || "장기요양기관")} ${gradeBadge(f.eval_grade)}</div>
