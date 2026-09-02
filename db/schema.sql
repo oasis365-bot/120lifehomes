@@ -1,6 +1,14 @@
 -- =====================================================================
--- 120 라이프홈즈 — Supabase(PostgreSQL) 스키마
--- Supabase 대시보드 → SQL Editor 에 붙여넣고 실행하세요.
+-- 120 라이프홈즈 — Supabase(PostgreSQL) 스키마 (부트스트랩용)
+-- =====================================================================
+--  ⚠️ 이 파일은 "빈 DB 를 처음 만들 때" 참고용입니다.
+--     현재 운영 DB 의 실제 상태는  db/baseline_schema.sql  을 보세요.
+--     스키마 변경은  db/migrations/  의 번호순 파일로만 합니다.
+--
+--  2026-09-02 동기화: 아래 요양시설 테이블에
+--     sigungu_nm / dong_nm / post_no / eval_date / detail_synced_at
+--     컬럼을 추가 반영 (운영 DB 에는 이미 SQL Editor 로 추가돼 있음).
+--     ※ 이 파일을 운영 DB 에 재실행하지 마세요 (create table if not exists 라 무해하지만 불필요).
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -12,16 +20,21 @@ create table if not exists public.facilities (
   type_code       text,                            -- 급여종류 코드
   type_label      text,                            -- 급여종류 한글 (노인요양시설 등)
   sido            text,                            -- 시도
-  sigungu         text,                            -- 시군구
-  address         text,                            -- 지번주소
-  road_address    text,                            -- 도로명주소
-  lat             double precision,
-  lng             double precision,
+  sigungu         text,                            -- 시군구 (법정동 5자리 코드)
+  sigungu_nm      text,                            -- 시군구명            [2026-09 추가]
+  dong_nm         text,                            -- 법정동명            [2026-09 추가]
+  address         text,                            -- 도로명주소
+  road_address    text,                            -- (미사용)
+  post_no         text,                            -- 우편번호            [2026-09 추가]
+  lat             double precision,                -- (미사용 · 항상 NULL)
+  lng             double precision,                -- (미사용 · 항상 NULL)
   phone           text,
   capacity        integer,                         -- 정원
   current_count   integer,                         -- 현원
   eval_grade      text,                            -- 평가등급 (A~E)
+  eval_date       date,                            -- 평가일              [2026-09 추가]
   established_at  date,                            -- 지정일자
+  detail_synced_at timestamptz,                    -- 상세보강 완료시각    [2026-09 추가]
 
   -- 제휴 시설이 직접 채우는 보강 정보 (공공데이터에 없음)
   monthly_fee     integer,                         -- 월 이용료(만원, 예상)
