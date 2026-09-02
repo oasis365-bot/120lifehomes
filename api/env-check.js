@@ -1,33 +1,43 @@
-// GET /api/env-check — 환경변수 존재/형태 확인 (비밀값 자체는 노출 안 함). 진단용.
+// GET /api/env-check — 환경변수 "설정 여부"만 확인 (진단용).
+//
+//   · 비밀값·비밀값의 일부(앞자리/뒷자리/길이/부분문자열)를 절대 응답하지 않는다.
+//   · CRON_SECRET 이 설정돼 있으면 ?secret=<CRON_SECRET> (또는 Bearer) 필요.
+//     설정 전(부트스트랩)에는 인증 없이 응답하되, 응답에 비밀정보가 전혀 없으므로 안전.
 export default function handler(req, res) {
-  const k = process.env.DATA_GO_KR_KEY || '';
-  const dataKeyMask = k ? `${k.slice(0, 6)}…${k.slice(-4)} (len ${k.length})` : null;
+  const secret = process.env.CRON_SECRET;
+  const authed =
+    !secret ||
+    req.headers.authorization === `Bearer ${secret}` ||
+    (req.query && req.query.secret === secret);
+  if (!authed) {
+    res.status(401).json({ error: 'unauthorized' });
+    return;
+  }
 
-  // Supabase 키의 role 클레임만 확인 (JWT payload 의 role 은 비밀 아님)
-  let supabaseRole = null;
+  const has = (name) => Boolean(process.env[name] && String(process.env[name]).trim());
+
+  // Supabase 키가 service_role 인지(= RLS 우회 가능) 여부만 boolean 으로.
+  // 키 문자열/클레임은 응답하지 않는다.
+  let supabaseKeyIsServiceRole = false;
   const sk = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
   try {
     if (sk.startsWith('eyJ')) {
-      const payload = JSON.parse(Buffer.from(sk.split('.')[1], 'base64').toString());
-      supabaseRole = payload.role || null;
+      const payload = JSON.parse(Buffer.from(sk.split('.')[1] || '', 'base64').toString());
+      supabaseKeyIsServiceRole = payload.role === 'service_role';
     } else if (sk.startsWith('sb_secret_')) {
-      supabaseRole = 'sb_secret (신형 secret)';
-    } else if (sk.startsWith('sb_publishable_')) {
-      supabaseRole = 'sb_publishable (신형 publishable — RLS 우회 불가!)';
-    } else if (sk) {
-      supabaseRole = 'unknown format';
+      supabaseKeyIsServiceRole = true; // 신형 secret 키
     }
+    // sb_publishable_ / anon / 기타 → false
   } catch {
-    supabaseRole = 'decode failed';
+    supabaseKeyIsServiceRole = false;
   }
 
+  res.setHeader('Cache-Control', 'no-store');
   res.status(200).json({
-    SUPABASE_URL: Boolean(process.env.SUPABASE_URL),
-    SUPABASE_SERVICE_ROLE_KEY: Boolean(sk),
-    SUPABASE_key_role: supabaseRole, // "service_role" 이어야 함
-    DATA_GO_KR_KEY: dataKeyMask,
-    CRON_SECRET: Boolean(process.env.CRON_SECRET),
-    node: process.version,
-    now: new Date().toISOString(),
+    supabase_url:                 { configured: has('SUPABASE_URL') },
+    supabase_service_role_key:    { configured: has('SUPABASE_SERVICE_ROLE_KEY'), is_service_role: supabaseKeyIsServiceRole },
+    data_go_kr_key:               { configured: has('DATA_GO_KR_KEY') },
+    cron_secret:                  { configured: has('CRON_SECRET') },
+    db_ready: has('SUPABASE_URL') && has('SUPABASE_SERVICE_ROLE_KEY') && supabaseKeyIsServiceRole,
   });
 }

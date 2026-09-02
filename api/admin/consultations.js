@@ -41,7 +41,11 @@ export default async function handler(req, res) {
 
     const status = req.query && req.query.status;
     const p = new URLSearchParams();
-    p.set('select', '*');
+    // 관리자 상담 화면(admin.html)이 실제 사용하는 컬럼만. source_ip·user_agent 는 제외.
+    p.set(
+      'select',
+      'id,created_at,name,phone,relation,region,facility_type,care_level,budget,facility_name,memo,status'
+    );
     p.set('order', 'created_at.desc');
     p.set('limit', '500');
     if (status) p.append('status', `eq.${status}`);

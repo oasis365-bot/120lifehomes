@@ -10,10 +10,9 @@
 //     · 마이그레이션(001) 전  → domain 컬럼을 아예 참조하지 않음 (완전 무변경).
 import { haveDb, sb } from '../lib/db.js';
 import { getFlags, flagOn } from '../lib/flags.js';
+import { FACILITY_PUBLIC_COLUMNS } from '../lib/facilitySelect.js';
 
-const BASE_SELECT =
-  'id,name,type_code,type_label,sido,sigungu,sigungu_nm,dong_nm,address,post_no,' +
-  'phone,capacity,current_count,eval_grade,eval_date,established_at,is_partner';
+const BASE_SELECT = FACILITY_PUBLIC_COLUMNS;
 
 export default async function handler(req, res) {
   if (!haveDb()) {

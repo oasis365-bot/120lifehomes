@@ -90,6 +90,15 @@ node test/compare_facilities_api.mjs \
 
 ---
 
+## C-2. 1A 보완 변경 회귀 (preview)
+
+| 변경 | 확인 |
+|---|---|
+| `api/facility.js` select 축소 (`*` → 공개 컬럼) | 시설 상세페이지 전 항목 정상 렌더 (주소·전화·정원·현원·평가등급·지정일·우편·지도링크). 응답에 `raw`·`monthly_fee` 등 미포함 |
+| `api/admin/consultations.js` select 축소 | 관리자 표 12개 열 정상. 응답에 `source_ip`·`user_agent` 미포함 |
+| `api/facilities.js` select 를 `lib/facilitySelect.js` 공유 | `/api/facilities` 응답 필드가 1A 이전과 동일 (id~is_partner) |
+| `api/env-check.js` | `?secret=` 없이 호출 시(운영에 CRON_SECRET 설정됨) `401`. `?secret=<CRON_SECRET>` 시 `{configured:...}` 만, **키 문자열·앞뒤자리·길이 없음** |
+
 ## D. 프런트 스모크 (1A 브랜치 preview, 수동)
 
 hospital_module = OFF 상태에서:

@@ -13,9 +13,10 @@
 --
 --    [3순위] 요양병원 데이터만 제거 (스키마 유지)
 --        delete from public.facilities where domain = 'HOSPITAL';
---        -- hospital_profiles / facility_evaluations / facility_sources /
---        -- facility_revisions / facility_duplicate_candidates 는
---        -- ON DELETE CASCADE 로 함께 삭제됨
+--        -- hospital_profiles / facility_evaluations / facility_duplicate_candidates
+--        --   → CASCADE 로 함께 삭제
+--        -- facility_sources / facility_revisions
+--        --   → facility_id 만 NULL 로, 원본·이력 기록은 보존 (감사)
 --
 --  아래 스크립트(스키마 원복)는 위 1~3으로 해결 안 될 때만.
 --  facilities 의 기존 행은 삭제하지 않는다. domain/source/hira_ykiho 컬럼 값만 사라진다.

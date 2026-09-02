@@ -14,6 +14,12 @@
 --        (자동 번역 끄기 · 실행 후 db/migrations/README.md 의 검증쿼리 확인)
 --
 --  재실행 안전: 모든 문장이 IF NOT EXISTS / 가드 처리됨 (idempotent).
+--
+--  FK ON DELETE 정책 (시설 물리 삭제는 원칙적으로 안 하지만, 롤백 대비):
+--    · hospital_profiles / facility_evaluations / facility_duplicate_candidates
+--        → CASCADE  (1:1 파생정보 · 재수집 가능 · 작업 큐. 시설 없으면 무의미)
+--    · facility_sources / facility_revisions
+--        → SET NULL (수집 원본 · 변경 이력 = 감사기록. 링크만 끊고 본문 보존)
 -- =====================================================================
 
 begin;
@@ -122,13 +128,15 @@ create table if not exists public.facility_evaluations (
 create index if not exists idx_facility_evaluations_facility on public.facility_evaluations (facility_id);
 
 -- ---------------------------------------------------------------------
--- 5. facility_sources — 수집 원본 추적 (fetch → raw 보관 → 정규화)
---    external_id = 원본 기관 식별자(심평원 요양기호 원문 등). 재수집 idempotent 키.
+-- 5. facility_sources — 수집 원본 추적 (fetch → raw 보관 → 정규화) · 감사기록
+--    · unique(source_system, external_id): 서로 다른 제공처의 동일 external_id 충돌 방지.
+--    · ON DELETE SET NULL: 시설이 (롤백 등으로) 물리 삭제돼도 원본 raw 기록은
+--      보존하고 링크만 끊는다. 감사 목적상 CASCADE 로 함께 지우지 않는다.
 -- ---------------------------------------------------------------------
 create table if not exists public.facility_sources (
   id               bigint generated always as identity primary key,
-  facility_id      text references public.facilities(id) on delete cascade,  -- 매칭 전이면 NULL 허용
-  source_system    text not null,                -- 'hira_hospital_info' | 'hira_hospital_eval' ...
+  facility_id      text references public.facilities(id) on delete set null,  -- 매칭 전/삭제 후엔 NULL
+  source_system    text not null,                -- 'hira_hospital_info' | 'hira_hospital_eval' | 'ltc_public_list' ...
   dataset_id       text,                         -- data.go.kr 서비스/데이터셋 식별자
   external_id      text,                         -- 원본 기관 식별자 (심평원 요양기호 원문)
   raw              jsonb not null,
@@ -136,17 +144,19 @@ create table if not exists public.facility_sources (
   fetched_at       timestamptz not null default now(),
   normalized_hash  text,
   verified_at      timestamptz,
-  unique (source_system, external_id)
+  constraint uq_facility_sources_system_extid unique (source_system, external_id)
 );
 create index if not exists idx_facility_sources_facility on public.facility_sources (facility_id);
 
 -- ---------------------------------------------------------------------
--- 6. facility_revisions — 필드 변경 이력 (파이프라인 vs 운영자 수정 구분)
---    공공데이터 재수집이 운영자 검수값을 무조건 덮어쓰지 않기 위한 근거.
+-- 6. facility_revisions — 필드 변경 이력 (파이프라인 vs 운영자 수정 구분) · 감사기록
+--    · 공공데이터 재수집이 운영자 검수값을 무조건 덮어쓰지 않기 위한 근거.
+--    · ON DELETE SET NULL + facility_id NULL 허용: 시설 물리 삭제 시에도
+--      변경 이력 본문(field / old_value / new_value / changed_by / created_at)은 보존.
 -- ---------------------------------------------------------------------
 create table if not exists public.facility_revisions (
   id             bigint generated always as identity primary key,
-  facility_id    text not null references public.facilities(id) on delete cascade,
+  facility_id    text references public.facilities(id) on delete set null,
   field          text not null,
   old_value      text,
   new_value      text,
