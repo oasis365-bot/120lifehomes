@@ -1,0 +1,44 @@
+{
+  "__CLEARLY_FAKE__": true,
+  "__WARNING__": "이 파일은 100% 가짜다. 실제 심평원(HIRA) 데이터가 아니다. DB 에 적재 금지. 실제 API 필드명과 무관하며, 어댑터 인터페이스의 '형태'만 검증하기 위한 것이다. 1B 에서 실제 응답 샘플로 전량 교체한다.",
+  "__source__": "hand-written placeholder, not from any API",
+  "__replace_in__": "1B — 실제 data.go.kr 심평원 병원정보서비스 / 병원평가정보서비스 응답",
+
+  "fake_hospital_records": [
+    {
+      "FAKE_ykiho": "FAKE-YKIHO-0000000001",
+      "FAKE_name": "가짜중앙요양병원",
+      "FAKE_addr": "가짜시 가짜구 가짜로 1",
+      "FAKE_sido": "가짜시",
+      "FAKE_sigungu": "가짜구",
+      "FAKE_postno": "00000",
+      "FAKE_tel": "000-0000-0000",
+      "FAKE_bed_total": -1,
+      "FAKE_lat": null,
+      "FAKE_lng": null,
+      "FAKE_note": "필드명(FAKE_*)과 값 전부 가짜. 실제 심평원 응답의 키 이름은 확인 전까지 모른다."
+    },
+    {
+      "FAKE_ykiho": "FAKE-YKIHO-0000000002",
+      "FAKE_name": "가짜햇살요양병원",
+      "FAKE_addr": "가짜도 가짜군 가짜면 2",
+      "FAKE_sido": "가짜도",
+      "FAKE_sigungu": "가짜군",
+      "FAKE_postno": "00000",
+      "FAKE_tel": "000-0000-0001",
+      "FAKE_bed_total": -1,
+      "FAKE_lat": null,
+      "FAKE_lng": null
+    }
+  ],
+
+  "fake_evaluation_records": [
+    {
+      "FAKE_ykiho": "FAKE-YKIHO-0000000001",
+      "FAKE_eval_name": "가짜 적정성평가",
+      "FAKE_eval_year": 9999,
+      "FAKE_grade": "FAKE-GRADE",
+      "FAKE_note": "요양병원 적정성평가 등급 체계(1~5 등)는 1B 에서 실제 확인. 요양원 A~E 와 절대 환산·비교 금지."
+    }
+  ]
+}
