@@ -44,9 +44,9 @@ export function makeMockClient(opt = {}) {
       const pool = [];
       for (let i = 0; i < n; i++) {
         const src = listItems[i % listItems.length];
-        // 고유 ykiho 로 치환 (중복 옵션 처리)
-        let ykiho = `${src.ykiho}#${i}`;
-        if (opt.dupEvery && i > 0 && i % opt.dupEvery === 0) ykiho = `${src.ykiho}#0`;
+        // 고유 ykiho 로 치환. dupEvery 이면 i=0 과 동일한 ykiho 를 재사용해 실제 중복 생성.
+        let ykiho = `${listItems[0].ykiho}#${i}`;
+        if (opt.dupEvery && i > 0 && i % opt.dupEvery === 0) ykiho = `${listItems[0].ykiho}#0`;
         pool.push({ ...src, ykiho });
       }
       const start = (pageNo - 1) * numOfRows;
