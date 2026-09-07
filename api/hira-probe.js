@@ -25,30 +25,33 @@ export const config = { maxDuration: 60 };
 // ── 엔드포인트 후보 (2021 가이드 v1 이 폐기(code 12)라 현행판 우선 probe) ──
 // 병원정보서비스: HIRA opendata(sno=713) = hospInfoService/getHospBasisList (접미사 1 없음)
 const HOSP_INFO_CANDIDATES = [
+  { base: 'https://apis.data.go.kr/B551182/hospInfoServicev2', op: 'getHospBasisList' }, // 실측 확정 (run #2)
   { base: 'https://apis.data.go.kr/B551182/hospInfoService', op: 'getHospBasisList' },
-  { base: 'https://apis.data.go.kr/B551182/hospInfoServicev2', op: 'getHospBasisList' },
   { base: 'https://apis.data.go.kr/B551182/hospInfoService1', op: 'getHospBasisList1' },
-  { base: 'https://apis.data.go.kr/B551182/hospInfoService2', op: 'getHospBasisList2' },
 ];
-// 병원평가정보서비스: hospAsmInfoService/getHospAsmInfo (2025 가이드) + 접미사 1 변형
+// 병원평가정보서비스: 실측 = hospAsmInfoService1/getHospAsmInfo1 (접미사 없는 판은 code 12)
 const HOSP_ASM_CANDIDATES = [
+  { base: 'https://apis.data.go.kr/B551182/hospAsmInfoService1', op: 'getHospAsmInfo1' }, // 실측 확정 (run #2)
   { base: 'https://apis.data.go.kr/B551182/hospAsmInfoService', op: 'getHospAsmInfo' },
-  { base: 'https://apis.data.go.kr/B551182/hospAsmInfoService1', op: 'getHospAsmInfo1' },
   { base: 'https://apis.data.go.kr/B551182/hospAsmInfoService2', op: 'getHospAsmInfo2' },
 ];
 // 의료기관별상세정보: HIRA opendata(sno=708) base 확정, op 는 구/신(2.8·2.7) 병행 probe
-const DTL_BASE_CANDIDATES = [
-  'https://apis.data.go.kr/B551182/medicInsttDetailInfoService',
-  'https://apis.data.go.kr/B551182/MadmDtlInfoService2.7',
+// base 접미사와 op 접미사가 같이 붙음: MadmDtlInfoService2.7/getDtlInfo2.7
+const DTL_CANDIDATES = [
+  { base: 'https://apis.data.go.kr/B551182/MadmDtlInfoService2.8', v: '2.8' },
+  { base: 'https://apis.data.go.kr/B551182/MadmDtlInfoService2.7', v: '2.7' },
+  { base: 'https://apis.data.go.kr/B551182/MadmDtlInfoService', v: '' },
 ];
-const DTL_OP_SETS = {
-  facility: ['getEqpInfo2.8', 'getEqpInfo2.7', 'getFacilityInfo'],                 // 시설·병상
-  detail: ['getDtlInfo2.8', 'getDtlInfo2.7', 'getDetailInfo'],                     // 세부·폐업여부
-  dgsbjt: ['getDgsbjtInfo2.8', 'getDgsbjtInfo2.7', 'getMdlrtSbjectInfoList'],      // 진료과목
-  equip: ['getMedOftInfo2.8', 'getMedOftInfo2.7', 'getMedicalEquipmentInfoList'],  // 의료장비
-  spcSbjt: ['getSpcSbjtSdrInfo2.8', 'getSpcSbjtSdrInfo2.7', 'getSpclMdlrtInfoList'], // 전문의수/특수진료
-  etc: ['getEtcHstInfo2.8', 'getEtcHstInfo2.7'],                                   // 기타인력수
+// 목적별 op 이름 (버전 접미사는 {v} 자리에 치환)
+const DTL_OPS = {
+  dtl: 'getDtlInfo{v}',            // 세부정보 (폐업·운영상태 추정)
+  eqp: 'getEqpInfo{v}',            // 시설정보 (병상수 추정)
+  dgsbjt: 'getDgsbjtInfo{v}',      // 진료과목정보
+  medOft: 'getMedOftInfo{v}',      // 의료장비정보
+  spcSbjt: 'getSpcSbjtSdrInfo{v}', // 전문과목별 전문의 수
+  etc: 'getEtcHstInfo{v}',         // 기타인력수
 };
+const dtlOp = (name, v) => name.replace('{v}', v);
 
 // ── util ──
 function decodedKey(k) {
@@ -234,7 +237,7 @@ export default async function handler(req, res) {
       const baseMap = {
         hospInfo: HOSP_INFO_CANDIDATES[0].base,
         hospAsm: HOSP_ASM_CANDIDATES[0].base,
-        dtl: DTL_BASE_CANDIDATES[0],
+        dtl: DTL_CANDIDATES[0].base,
       };
       const base = baseMap[q.base] || (q.base && q.base.startsWith('http') ? q.base : HOSP_INFO_CANDIDATES[0].base);
       const op = q.op || HOSP_INFO_CANDIDATES[0].op;
@@ -283,46 +286,36 @@ export default async function handler(req, res) {
       rec('S2_hospList_one', s2);
       await sleep(GAP);
 
-      // ── 2) 의료기관별상세정보 엔드포인트 확정 (facility op-set 로 base+버전 락) ──
-      let dtlBase = null;
-      let dtlVer = null; // '2.8' | '2.7' | 'old'
+      // ── 2) 의료기관별상세정보 엔드포인트 확정 (getDtlInfo{v} 로 base+버전 락) ──
+      let dtl = null; // { base, v }
       if (ykA) {
-        outer:
-        for (const cand of DTL_BASE_CANDIDATES) {
-          for (const op of DTL_OP_SETS.facility) {
-            const r = await hiraGet(cand, op, key, { ykiho: ykA, numOfRows: 5, pageNo: 1 }, 3);
-            out.calls += 1;
-            await sleep(GAP);
-            if (endpointAlive(r)) {
-              dtlBase = cand;
-              dtlVer = op.endsWith('2.8') ? '2.8' : op.endsWith('2.7') ? '2.7' : 'old';
-              out.samples['S3_facility(시설·병상)'] = r;
-              break outer;
-            }
+        const tried = [];
+        for (const c of DTL_CANDIDATES) {
+          const op = dtlOp(DTL_OPS.dtl, c.v);
+          const r = await hiraGet(c.base, op, key, { ykiho: ykA, numOfRows: 5, pageNo: 1 }, 5);
+          out.calls += 1;
+          tried.push({ base: c.base, op, httpStatus: r.httpStatus, resultCode: r.resultCode, resultMsg: r.resultMsg });
+          await sleep(GAP);
+          if (endpointAlive(r)) {
+            dtl = { base: c.base, v: c.v };
+            out.samples['S9c_detail(세부·폐업여부)'] = r; // getDtlInfo = 세부정보(폐업/운영상태)
+            break;
           }
         }
-        out.endpoints.dtl = { base: dtlBase, version: dtlVer };
-        out.notes.push(dtlBase ? `의료기관별상세정보 base=${dtlBase} ver=${dtlVer}` : '의료기관별상세정보 후보 모두 실패');
+        out.endpoints.dtl = { resolved: dtl, tried };
+        out.notes.push(dtl ? `의료기관별상세정보 base=${dtl.base} v=${dtl.v || '(none)'}` : '의료기관별상세정보 후보 모두 실패');
       }
 
-      // 확정된 버전으로 op 선택
-      const pickOp = (set) => {
-        const arr = DTL_OP_SETS[set];
-        if (dtlVer === '2.8') return arr.find((o) => o.endsWith('2.8')) || arr[0];
-        if (dtlVer === '2.7') return arr.find((o) => o.endsWith('2.7')) || arr[0];
-        return arr[arr.length - 1];
-      };
-
-      // ── S4~S6, S9c: 같은 ykiho 상세 ──
-      if (ykA && dtlBase) {
-        const s4 = await hiraGet(dtlBase, pickOp('spcSbjt'), key, { ykiho: ykA, numOfRows: 20, pageNo: 1 }, 5);
+      // ── S3~S6: 같은 ykiho 상세 ──
+      if (ykA && dtl) {
+        const s3 = await hiraGet(dtl.base, dtlOp(DTL_OPS.eqp, dtl.v), key, { ykiho: ykA, numOfRows: 10, pageNo: 1 }, 8);
+        rec('S3_eqp(시설·병상)', s3); await sleep(GAP);
+        const s4 = await hiraGet(dtl.base, dtlOp(DTL_OPS.spcSbjt, dtl.v), key, { ykiho: ykA, numOfRows: 20, pageNo: 1 }, 8);
         rec('S4_spcSbjt(전문의수)', s4); await sleep(GAP);
-        const s5 = await hiraGet(dtlBase, pickOp('dgsbjt'), key, { ykiho: ykA, numOfRows: 30, pageNo: 1 }, 5);
+        const s5 = await hiraGet(dtl.base, dtlOp(DTL_OPS.dgsbjt, dtl.v), key, { ykiho: ykA, numOfRows: 30, pageNo: 1 }, 8);
         rec('S5_dgsbjt(진료과목)', s5); await sleep(GAP);
-        const s6 = await hiraGet(dtlBase, pickOp('equip'), key, { ykiho: ykA, numOfRows: 30, pageNo: 1 }, 5);
-        rec('S6_equip(의료장비)', s6); await sleep(GAP);
-        const s9c = await hiraGet(dtlBase, pickOp('detail'), key, { ykiho: ykA, numOfRows: 5, pageNo: 1 }, 3);
-        rec('S9c_detail(세부·폐업여부)', s9c); await sleep(GAP);
+        const s6 = await hiraGet(dtl.base, dtlOp(DTL_OPS.medOft, dtl.v), key, { ykiho: ykA, numOfRows: 30, pageNo: 1 }, 8);
+        rec('S6_medOft(의료장비)', s6); await sleep(GAP);
       }
 
       // ── 3) 병원평가정보 엔드포인트 확정 + S7 ──
