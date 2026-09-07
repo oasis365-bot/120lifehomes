@@ -10,9 +10,14 @@
 //  · DATA_GO_KR_KEY / CRON_SECRET 은 서버 환경변수에서만. 값·URL 을 로그/오류에 노출하지 않음.
 //
 //  쿼리:
-//    ?limit=<1..20>   수집할 기관 수 (기본 5, 상한 20)
+//    ?limit=<1..20>   수집할 기관 수 (기본 3, 상한 20)
 //    ?dryRun=false    (무시됨 — write 미구현, 501)
 //    ?secret=         (Bearer 대신 호환용)
+//
+//  ⚠️ 실행시간: 기관당 API 호출 ≈ 7회(상세 6 + 평가 1) + 요청 간 최소 250ms.
+//     limit=3 → ~22회 → 250ms 페이싱 5.5s + 지연 ≈ 25~35s (60s 안).
+//     limit=20 → ~141회 → 페이싱만 35s + 지연 → 60s 초과 위험. 전량(1,280)은 절대 단일 호출 금지.
+//     → 1B-3 전체 수집은 배치·체크포인트·재시작 구조 필요 (enrich.js 패턴).
 // =====================================================================
 import { timingSafeEqual } from 'node:crypto';
 import { createHiraClient, HiraError } from '../../lib/hira/client.js';
@@ -78,7 +83,7 @@ export function createHandler(deps = {}) {
     }
 
     const limit = Math.min(
-      Math.max(parseInt(q.limit, 10) || 5, 1),
+      Math.max(parseInt(q.limit, 10) || 3, 1),
       MAX_INSTITUTIONS_HARD_CAP
     );
 

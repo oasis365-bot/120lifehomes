@@ -61,6 +61,20 @@ export const JSON_GATEWAY_22 = JSON.stringify({
   },
 });
 
+// 게이트웨이 오류 JSON (code 99 — UNKNOWN_ERROR, 실측 근거 없음 → 재시도 안 함)
+export const JSON_GATEWAY_99 = JSON.stringify({
+  OpenAPI_ServiceResponse: {
+    cmmMsgHeader: { errMsg: 'UNKNOWN_ERROR', returnAuthMsg: 'UNKNOWN ERROR', returnReasonCode: '99' },
+  },
+});
+
+// 게이트웨이 오류 JSON (code 1 — APPLICATION_ERROR, 재시도 안 함)
+export const JSON_GATEWAY_1 = JSON.stringify({
+  OpenAPI_ServiceResponse: {
+    cmmMsgHeader: { errMsg: 'APPLICATION_ERROR', returnAuthMsg: 'APPLICATION ERROR', returnReasonCode: '1' },
+  },
+});
+
 // 서비스 정상 응답이나 결과 0건 (item 없음)
 export const JSON_EMPTY = JSON.stringify({
   response: {

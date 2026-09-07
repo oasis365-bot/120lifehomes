@@ -131,6 +131,16 @@ test('5c. 일일한도(code 22)도 재시도 안 함', async () => {
   assert.equal(ff.calls.length, 1);
 });
 
+test('5d. code 99 / code 1 은 재시도 안 함 (보수적 분류)', async () => {
+  for (const body of [RAW.JSON_GATEWAY_99, RAW.JSON_GATEWAY_1]) {
+    const ff = fakeFetch([{ status: 200, text: body }]);
+    const c = createHiraClient({ key: 'k', fetchImpl: ff, sleepImpl: fakeSleep(), minIntervalMs: 0 });
+    const r = await c.listHospitals();
+    assert.equal(r.gatewayError, true);
+    assert.equal(ff.calls.length, 1); // 재시도 없음
+  }
+});
+
 test('요청 간 최소 간격이 강제됨 (minIntervalMs)', async () => {
   let clock = 0;
   const now = () => clock;

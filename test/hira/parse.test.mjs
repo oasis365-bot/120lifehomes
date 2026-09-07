@@ -67,6 +67,10 @@ test('3. resultCode / resultMsg 오류 처리', () => {
   assert.equal(gw22.gatewayError, true);
   assert.equal(gw22.resultCode, '22');
   assert.equal(isTransientResult(gw22), false); // 일일한도 초과는 재시도 대상 아님
+
+  // code 1·99 는 실측 근거 없어 재시도 대상 아님 (보수적 분류 — 1B-2V)
+  assert.equal(isTransientResult(parseHiraResponse(RAW.JSON_GATEWAY_99)), false);
+  assert.equal(isTransientResult(parseHiraResponse(RAW.JSON_GATEWAY_1)), false);
 });
 
 test('3b. 완전 쓰레기 입력도 throw 하지 않음', () => {
