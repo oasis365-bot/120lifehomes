@@ -1,0 +1,14 @@
+{
+  "response": {
+    "header": { "resultCode": "00", "resultMsg": "NORMAL SERVICE." },
+    "body": {
+      "items": {
+        "item": [
+          { "oftCd": "B101", "oftCdNm": "일반엑스선촬영장치", "oftCnt": 1 },
+          { "oftCd": "D202", "oftCdNm": "인공호흡기", "oftCnt": 1 }
+        ]
+      },
+      "numOfRows": 30, "pageNo": 1, "totalCount": 2
+    }
+  }
+}

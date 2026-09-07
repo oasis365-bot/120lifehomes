@@ -1,0 +1,23 @@
+{
+  "response": {
+    "header": { "resultCode": "00", "resultMsg": "NORMAL SERVICE." },
+    "body": {
+      "items": {
+        "item": [
+          { "cdiagDrCnt": 0, "dgsbjtCd": "01", "dgsbjtCdNm": "내과", "dgsbjtPrSdrCnt": 1 },
+          { "cdiagDrCnt": 0, "dgsbjtCd": "04", "dgsbjtCdNm": "외과", "dgsbjtPrSdrCnt": 2 },
+          { "cdiagDrCnt": 0, "dgsbjtCd": 80, "dgsbjtCdNm": "한방내과", "dgsbjtPrSdrCnt": 0 },
+          { "cdiagDrCnt": 0, "dgsbjtCd": 81, "dgsbjtCdNm": "한방부인과", "dgsbjtPrSdrCnt": 0 },
+          { "cdiagDrCnt": 0, "dgsbjtCd": 82, "dgsbjtCdNm": "한방소아과", "dgsbjtPrSdrCnt": 0 },
+          { "cdiagDrCnt": 0, "dgsbjtCd": 83, "dgsbjtCdNm": "한방안·이비인후·피부과", "dgsbjtPrSdrCnt": 0 },
+          { "cdiagDrCnt": 0, "dgsbjtCd": 84, "dgsbjtCdNm": "한방신경정신과", "dgsbjtPrSdrCnt": 0 },
+          { "cdiagDrCnt": 0, "dgsbjtCd": 85, "dgsbjtCdNm": "침구과", "dgsbjtPrSdrCnt": 0 },
+          { "cdiagDrCnt": 0, "dgsbjtCd": 86, "dgsbjtCdNm": "한방재활의학과", "dgsbjtPrSdrCnt": 0 },
+          { "cdiagDrCnt": 0, "dgsbjtCd": 87, "dgsbjtCdNm": "사상체질과", "dgsbjtPrSdrCnt": 0 },
+          { "cdiagDrCnt": 0, "dgsbjtCd": 88, "dgsbjtCdNm": "한방응급", "dgsbjtPrSdrCnt": 0 }
+        ]
+      },
+      "numOfRows": 30, "pageNo": 1, "totalCount": 11
+    }
+  }
+}

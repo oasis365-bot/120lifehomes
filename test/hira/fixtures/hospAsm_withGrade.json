@@ -1,0 +1,16 @@
+{
+  "response": {
+    "header": { "resultCode": "00", "resultMsg": "NORMAL SERVICE." },
+    "body": {
+      "items": {
+        "item": {
+          "addr": "경상남도 김해시 김해대로 2479-1, (삼정동)",
+          "asmGrd10": 4, "clCd": 28, "clCdNm": "요양병원",
+          "yadmNm": "(의)밀성학원의료재단 성모아하브요양병원",
+          "ykiho": "JDQ4MTYyMiM4MSMkMSMkNCMkOTkkNTgxMzUxIzIxIyQxIyQ1IyQ4OSQzNjE4MzIjNjEjJDEjJDAjJDgz"
+        }
+      },
+      "numOfRows": 10, "pageNo": 1, "totalCount": 1
+    }
+  }
+}
