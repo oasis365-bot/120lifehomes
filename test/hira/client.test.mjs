@@ -77,7 +77,7 @@ test('4b. timeout(abort) → 재시도 후 성공', async () => {
       err.name = 'AbortError';
       throw err;
     }
-    return { status: 200, text: fx('hospBasisList_one.json') };
+    return { status: 200, text: async () => fx('hospBasisList_one.json') };
   };
   ff.calls = [];
   const c = createHiraClient({ key: 'k', fetchImpl: ff, sleepImpl: fakeSleep(), minIntervalMs: 0 });

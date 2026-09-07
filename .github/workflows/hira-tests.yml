@@ -36,5 +36,7 @@ jobs:
           done
           exit $fail
 
-      - name: unit tests (node --test test/)
-        run: node --test test/
+      - name: unit tests (node --test test/hira/)
+        # test/hira/ 만 대상 — test/compare_facilities_api.mjs 는 라이브 URL 인자 필요한
+        # 별도 통합 스크립트라 유닛 러너에서 제외.
+        run: node --test test/hira/
