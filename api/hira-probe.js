@@ -14,34 +14,40 @@
 //
 //  사용
 //   GET /api/hira-probe                    → mode=check (기본): 환경변수 존재 여부만. HIRA 호출 X
-//   GET /api/hira-probe?mode=run           → S1~S9 시퀀스 수집. HIRA GET 약 12~22회, 순차 250ms 간격(≈4tps)
-//   GET /api/hira-probe?mode=one&base=hospInfo|hospAsm|dtl&op=..&ykiho=..&clCd=..&numOfRows=..
+//   GET /api/hira-probe?mode=run           → 엔드포인트 확정 + S1~S9 시퀀스. GET 최대 30회, 순차 250ms(≈4tps)
+//   GET /api/hira-probe?mode=one&base=<url|hospInfo|hospAsm|dtl>&op=..&ykiho=..&clCd=..&numOfRows=..
 //                                          → 단건 디버그
 // =====================================================================
 import { timingSafeEqual } from 'node:crypto';
 
 export const config = { maxDuration: 60 };
 
-// ── 확정된 base (1B-0 공식 가이드) ──
-const HOSP_INFO_BASE = 'https://apis.data.go.kr/B551182/hospInfoService1';
-const HOSP_ASM_BASE = 'https://apis.data.go.kr/B551182/hospAsmInfoService1';
-const OP_HOSP_LIST = 'getHospBasisList1';
-const OP_HOSP_ASM = 'getHospAsmInfo1';
-
-// ── 의료기관별상세정보 2.8 : base 미확정 → 후보 probe ──
+// ── 엔드포인트 후보 (2021 가이드 v1 이 폐기(code 12)라 현행판 우선 probe) ──
+// 병원정보서비스: HIRA opendata(sno=713) = hospInfoService/getHospBasisList (접미사 1 없음)
+const HOSP_INFO_CANDIDATES = [
+  { base: 'https://apis.data.go.kr/B551182/hospInfoService', op: 'getHospBasisList' },
+  { base: 'https://apis.data.go.kr/B551182/hospInfoServicev2', op: 'getHospBasisList' },
+  { base: 'https://apis.data.go.kr/B551182/hospInfoService1', op: 'getHospBasisList1' },
+  { base: 'https://apis.data.go.kr/B551182/hospInfoService2', op: 'getHospBasisList2' },
+];
+// 병원평가정보서비스: hospAsmInfoService/getHospAsmInfo (2025 가이드) + 접미사 1 변형
+const HOSP_ASM_CANDIDATES = [
+  { base: 'https://apis.data.go.kr/B551182/hospAsmInfoService', op: 'getHospAsmInfo' },
+  { base: 'https://apis.data.go.kr/B551182/hospAsmInfoService1', op: 'getHospAsmInfo1' },
+  { base: 'https://apis.data.go.kr/B551182/hospAsmInfoService2', op: 'getHospAsmInfo2' },
+];
+// 의료기관별상세정보: HIRA opendata(sno=708) base 확정, op 는 구/신(2.8·2.7) 병행 probe
 const DTL_BASE_CANDIDATES = [
   'https://apis.data.go.kr/B551182/medicInsttDetailInfoService',
-  'https://apis.data.go.kr/B551182/medicInsttDetailInfoService2.8',
-  'https://apis.data.go.kr/B551182/MadmDtlInfoService2.8',
-  'https://apis.data.go.kr/B551182/MadmDtlInfoService',
+  'https://apis.data.go.kr/B551182/MadmDtlInfoService2.7',
 ];
-const DTL_OPS = {
-  eqp: 'getEqpInfo2.8',        // 시설정보 (병상 추정)
-  dtl: 'getDtlInfo2.8',        // 세부정보 (폐업·운영상태 추정)
-  dgsbjt: 'getDgsbjtInfo2.8',  // 진료과목정보
-  medOft: 'getMedOftInfo2.8',  // 의료장비정보
-  spcSbjt: 'getSpcSbjtSdrInfo2.8', // 전문과목별 전문의 수
-  etcHst: 'getEtcHstInfo2.8',  // 기타인력수
+const DTL_OP_SETS = {
+  facility: ['getEqpInfo2.8', 'getEqpInfo2.7', 'getFacilityInfo'],                 // 시설·병상
+  detail: ['getDtlInfo2.8', 'getDtlInfo2.7', 'getDetailInfo'],                     // 세부·폐업여부
+  dgsbjt: ['getDgsbjtInfo2.8', 'getDgsbjtInfo2.7', 'getMdlrtSbjectInfoList'],      // 진료과목
+  equip: ['getMedOftInfo2.8', 'getMedOftInfo2.7', 'getMedicalEquipmentInfoList'],  // 의료장비
+  spcSbjt: ['getSpcSbjtSdrInfo2.8', 'getSpcSbjtSdrInfo2.7', 'getSpclMdlrtInfoList'], // 전문의수/특수진료
+  etc: ['getEtcHstInfo2.8', 'getEtcHstInfo2.7'],                                   // 기타인력수
 };
 
 // ── util ──
@@ -74,7 +80,7 @@ function parse(text) {
     const gw = j?.OpenAPI_ServiceResponse?.cmmMsgHeader;
     if (gw) {
       return {
-        format: 'json', resultCode: gw.returnReasonCode ?? null, resultMsg: gw.returnAuthMsg ?? null,
+        format: 'json', resultCode: gw.returnReasonCode ?? null, resultMsg: gw.returnAuthMsg ?? gw.errMsg ?? null,
         totalCount: null, numOfRows: null, pageNo: null, items: [], gatewayError: true,
       };
     }
@@ -90,7 +96,7 @@ function parse(text) {
   } catch { /* not json → xml */ }
   const pick = (re) => (text.match(re) || [])[1] ?? null;
   const rc = pick(/<resultCode>([^<]*)<\/resultCode>/) ?? pick(/<returnReasonCode>([^<]*)<\/returnReasonCode>/);
-  const rm = pick(/<resultMsg>([^<]*)<\/resultMsg>/) ?? pick(/<returnAuthMsg>([^<]*)<\/returnAuthMsg>/);
+  const rm = pick(/<resultMsg>([^<]*)<\/resultMsg>/) ?? pick(/<returnAuthMsg>([^<]*)<\/returnAuthMsg>/) ?? pick(/<errMsg>([^<]*)<\/errMsg>/);
   const tc = pick(/<totalCount>([^<]*)<\/totalCount>/);
   const nor = pick(/<numOfRows>([^<]*)<\/numOfRows>/);
   const items = [];
@@ -106,7 +112,7 @@ function parse(text) {
   return {
     format: 'xml', resultCode: rc, resultMsg: rm,
     totalCount: tc != null ? Number(tc) : null, numOfRows: nor, pageNo: null, items,
-    gatewayError: /<OpenAPI_ServiceResponse>/.test(text),
+    gatewayError: /<OpenAPI_ServiceResponse>/.test(text) || /<cmmMsgHeader>/.test(text),
   };
 }
 
@@ -133,8 +139,6 @@ async function hiraGet(base, op, key, params = {}, keep = 3) {
   }
   const clean = scrub(text, key);
   const p = parse(clean);
-  const firstFields = p.items[0] ? Object.keys(p.items[0]) : [];
-  // 모든 item 의 필드 합집합 (NULL/누락 파악용)
   const allFields = new Set();
   for (const it of p.items) for (const k of Object.keys(it)) allFields.add(k);
   return {
@@ -148,29 +152,53 @@ async function hiraGet(base, op, key, params = {}, keep = 3) {
     numOfRows: p.numOfRows,
     pageNo: p.pageNo,
     itemCount: p.items.length,
-    firstItemFields: firstFields,
+    firstItemFields: p.items[0] ? Object.keys(p.items[0]) : [],
     unionFields: [...allFields],
     items: p.items.slice(0, keep),
-    rawSnippet: clean.slice(0, 4000),
+    rawSnippet: clean.slice(0, 3500),
   };
 }
 
-// 응답이 "정상"인지 (게이트웨이/서비스 에러 아님)
-function looksOk(r) {
-  if (!r || r.httpStatus < 200 || r.httpStatus >= 300) return false;
-  if (r.gatewayError) return false;
+// 게이트웨이/서비스 미존재(12,99,NO_OPENAPI...) 가 아니면 "엔드포인트는 살아있음" 으로 간주
+function endpointAlive(r) {
+  if (!r || r.error) return false;
+  if (r.httpStatus >= 500) return false;
   const rc = String(r.resultCode ?? '');
-  return rc === '00' || rc === '0' || rc === 'NORMAL SERVICE.' || rc === '';
+  if (r.gatewayError && (rc === '12' || rc === '99' || rc === '')) return false;
+  if (/NO_OPENAPI_SERVICE/i.test(String(r.resultMsg ?? ''))) return false;
+  return true;
+}
+
+// 후보 목록에서 살아있는 {base, op} 하나를 찾음
+async function resolveService(cands, key, params, gap) {
+  const tried = [];
+  for (const c of cands) {
+    const r = await hiraGet(c.base, c.op, key, params);
+    tried.push({ base: c.base, op: c.op, httpStatus: r.httpStatus, resultCode: r.resultCode, resultMsg: r.resultMsg, gatewayError: r.gatewayError });
+    await sleep(gap);
+    if (endpointAlive(r)) return { resolved: c, probe: r, tried };
+  }
+  return { resolved: null, probe: null, tried };
+}
+
+// 여러 op 후보 중 살아있는 것으로 호출
+async function hiraTry(base, ops, key, params, gap, keep = 3) {
+  let last = null;
+  for (const op of ops) {
+    const r = await hiraGet(base, op, key, params, keep);
+    await sleep(gap);
+    if (endpointAlive(r)) return r;
+    last = r;
+  }
+  return last;
 }
 
 // ── handler ──
 export default async function handler(req, res) {
-  // 1) production 차단
   if (process.env.VERCEL_ENV === 'production') {
     res.status(404).json({ error: 'not_found' });
     return;
   }
-  // 2) CRON_SECRET 인증
   const secret = process.env.CRON_SECRET || '';
   const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
   const qsecret = req.query && typeof req.query.secret === 'string' ? req.query.secret : '';
@@ -185,7 +213,6 @@ export default async function handler(req, res) {
   const mode = q.mode || 'check';
   const key = process.env.DATA_GO_KR_KEY || '';
 
-  // 3) check: 환경변수 존재 여부만 (HIRA 호출 없음)
   if (mode === 'check') {
     res.status(200).json({
       mode: 'check',
@@ -204,100 +231,143 @@ export default async function handler(req, res) {
 
   try {
     if (mode === 'one') {
-      const baseMap = { hospInfo: HOSP_INFO_BASE, hospAsm: HOSP_ASM_BASE };
-      const base = baseMap[q.base] || (q.base && q.base.startsWith('http') ? q.base : DTL_BASE_CANDIDATES[0]);
-      const op = q.op || OP_HOSP_LIST;
+      const baseMap = {
+        hospInfo: HOSP_INFO_CANDIDATES[0].base,
+        hospAsm: HOSP_ASM_CANDIDATES[0].base,
+        dtl: DTL_BASE_CANDIDATES[0],
+      };
+      const base = baseMap[q.base] || (q.base && q.base.startsWith('http') ? q.base : HOSP_INFO_CANDIDATES[0].base);
+      const op = q.op || HOSP_INFO_CANDIDATES[0].op;
       const params = {};
       for (const k of ['ykiho', 'clCd', 'zipCd', 'sidoCd', 'sgguCd', 'numOfRows', 'pageNo', 'yadmNm', 'dgsbjtCd']) {
         if (q[k] != null && q[k] !== '') params[k] = q[k];
       }
-      const r = await hiraGet(base, op, key, params);
+      const r = await hiraGet(base, op, key, params, 5);
       res.status(200).json({ mode: 'one', result: r });
       return;
     }
 
     if (mode === 'run') {
-      const out = { mode: 'run', startedAt: new Date().toISOString(), calls: 0, samples: {}, notes: [] };
+      const out = { mode: 'run', startedAt: new Date().toISOString(), calls: 0, endpoints: {}, samples: {}, notes: [] };
       const rec = (name, r) => { out.samples[name] = r; out.calls += 1; };
-      const GAP = 250; // ms, ≈4tps (30tps 한도 대비 충분히 느림)
+      const GAP = 250; // ms ≈4tps
 
-      // ---- S1: 요양병원 목록 5건 ----
-      const s1 = await hiraGet(HOSP_INFO_BASE, OP_HOSP_LIST, key, { clCd: '28', numOfRows: 5, pageNo: 1 });
+      // ── 1) 병원정보서비스 엔드포인트 확정 ──
+      const hi = await resolveService(HOSP_INFO_CANDIDATES, key, { clCd: '28', numOfRows: 3, pageNo: 1 }, GAP);
+      out.calls += hi.tried.length;
+      out.endpoints.hospInfo = { resolved: hi.resolved, tried: hi.tried };
+      if (!hi.resolved) {
+        out.notes.push('병원정보서비스 후보 모두 실패 → 중단');
+        out.finishedAt = new Date().toISOString();
+        res.status(200).json(out);
+        return;
+      }
+      const HB = hi.resolved;
+
+      // ── S1: 요양병원 목록 5건 ──
+      const s1 = await hiraGet(HB.base, HB.op, key, { clCd: '28', numOfRows: 5, pageNo: 1 }, 5);
       rec('S1_hospList_clCd28', s1);
       await sleep(GAP);
-
       const list = Array.isArray(s1.items) ? s1.items : [];
-      // ykiho 후보: 좌표 있는 것 / 없는 것
-      const ykOf = (it) => it.ykiho ?? it.YKIHO ?? null;
+      const ykOf = (it) => it.ykiho ?? it.YKIHO ?? it.ykIho ?? null;
       const hasCoord = (it) =>
         (it.XPos != null && it.XPos !== '') || (it.YPos != null && it.YPos !== '') ||
         (it.xPos != null && it.xPos !== '') || (it.yPos != null && it.yPos !== '');
       const withCoord = list.find((it) => ykOf(it) && hasCoord(it));
       const noCoordIn5 = list.find((it) => ykOf(it) && !hasCoord(it));
       const ykA = ykOf(withCoord || list.find((it) => ykOf(it)) || {});
-      if (!ykA) {
-        out.notes.push('S1 에서 ykiho 를 못 얻음 → S2~S8 중단');
-      }
+      if (!ykA) out.notes.push('S1 에서 ykiho 미확보 → S2~S9 상세 중단');
 
-      // ---- S2: 1곳 기본정보 (numOfRows=1 로 별도 확인) ----
-      const s2 = await hiraGet(HOSP_INFO_BASE, OP_HOSP_LIST, key, { clCd: '28', numOfRows: 1, pageNo: 1 });
+      // ── S2: 1곳 기본정보 ──
+      const s2 = await hiraGet(HB.base, HB.op, key, { clCd: '28', numOfRows: 1, pageNo: 1 }, 1);
       rec('S2_hospList_one', s2);
       await sleep(GAP);
 
-      // ---- 의료기관별상세정보 base 확정 (getEqpInfo2.8 로 probe) ----
+      // ── 2) 의료기관별상세정보 엔드포인트 확정 (facility op-set 로 base+버전 락) ──
       let dtlBase = null;
+      let dtlVer = null; // '2.8' | '2.7' | 'old'
       if (ykA) {
+        outer:
         for (const cand of DTL_BASE_CANDIDATES) {
-          const p = await hiraGet(cand, DTL_OPS.eqp, key, { ykiho: ykA, numOfRows: 10, pageNo: 1 });
-          out.calls += 1;
-          await sleep(GAP);
-          if (p.httpStatus === 200 && !p.gatewayError) {
-            dtlBase = cand;
-            out.samples['DTL_base_probe_OK'] = { candidate: cand, resultCode: p.resultCode, itemCount: p.itemCount, firstItemFields: p.firstItemFields };
-            break;
+          for (const op of DTL_OP_SETS.facility) {
+            const r = await hiraGet(cand, op, key, { ykiho: ykA, numOfRows: 5, pageNo: 1 }, 3);
+            out.calls += 1;
+            await sleep(GAP);
+            if (endpointAlive(r)) {
+              dtlBase = cand;
+              dtlVer = op.endsWith('2.8') ? '2.8' : op.endsWith('2.7') ? '2.7' : 'old';
+              out.samples['S3_facility(시설·병상)'] = r;
+              break outer;
+            }
           }
-          out.samples[`DTL_base_probe_fail__${cand.split('/').pop()}`] = { candidate: cand, httpStatus: p.httpStatus, gatewayError: p.gatewayError, resultCode: p.resultCode, resultMsg: p.resultMsg };
         }
-        out.notes.push(dtlBase ? `의료기관별상세정보 base = ${dtlBase}` : '의료기관별상세정보 base 후보 모두 실패');
+        out.endpoints.dtl = { base: dtlBase, version: dtlVer };
+        out.notes.push(dtlBase ? `의료기관별상세정보 base=${dtlBase} ver=${dtlVer}` : '의료기관별상세정보 후보 모두 실패');
       }
 
-      // ---- S3~S6 : 같은 ykiho 상세 ----
+      // 확정된 버전으로 op 선택
+      const pickOp = (set) => {
+        const arr = DTL_OP_SETS[set];
+        if (dtlVer === '2.8') return arr.find((o) => o.endsWith('2.8')) || arr[0];
+        if (dtlVer === '2.7') return arr.find((o) => o.endsWith('2.7')) || arr[0];
+        return arr[arr.length - 1];
+      };
+
+      // ── S4~S6, S9c: 같은 ykiho 상세 ──
       if (ykA && dtlBase) {
-        const s3 = await hiraGet(dtlBase, DTL_OPS.eqp, key, { ykiho: ykA, numOfRows: 10, pageNo: 1 });
-        rec('S3_eqp(시설·병상)', s3); await sleep(GAP);
-        const s4 = await hiraGet(dtlBase, DTL_OPS.spcSbjt, key, { ykiho: ykA, numOfRows: 20, pageNo: 1 });
+        const s4 = await hiraGet(dtlBase, pickOp('spcSbjt'), key, { ykiho: ykA, numOfRows: 20, pageNo: 1 }, 5);
         rec('S4_spcSbjt(전문의수)', s4); await sleep(GAP);
-        const s5 = await hiraGet(dtlBase, DTL_OPS.dgsbjt, key, { ykiho: ykA, numOfRows: 30, pageNo: 1 });
+        const s5 = await hiraGet(dtlBase, pickOp('dgsbjt'), key, { ykiho: ykA, numOfRows: 30, pageNo: 1 }, 5);
         rec('S5_dgsbjt(진료과목)', s5); await sleep(GAP);
-        const s6 = await hiraGet(dtlBase, DTL_OPS.medOft, key, { ykiho: ykA, numOfRows: 30, pageNo: 1 });
-        rec('S6_medOft(의료장비)', s6); await sleep(GAP);
-        // S9-③,④ 근거: 세부정보(폐업·운영상태), 기타인력
-        const s9c = await hiraGet(dtlBase, DTL_OPS.dtl, key, { ykiho: ykA, numOfRows: 10, pageNo: 1 });
-        rec('S9c_dtl(세부·폐업여부)', s9c); await sleep(GAP);
-        const s9c2 = await hiraGet(dtlBase, DTL_OPS.etcHst, key, { ykiho: ykA, numOfRows: 10, pageNo: 1 });
-        rec('S9c_etcHst(기타인력)', s9c2); await sleep(GAP);
+        const s6 = await hiraGet(dtlBase, pickOp('equip'), key, { ykiho: ykA, numOfRows: 30, pageNo: 1 }, 5);
+        rec('S6_equip(의료장비)', s6); await sleep(GAP);
+        const s9c = await hiraGet(dtlBase, pickOp('detail'), key, { ykiho: ykA, numOfRows: 5, pageNo: 1 }, 3);
+        rec('S9c_detail(세부·폐업여부)', s9c); await sleep(GAP);
       }
 
-      // ---- S7 : 같은 기관 병원평가 ----
+      // ── 3) 병원평가정보 엔드포인트 확정 + S7 ──
       if (ykA) {
-        const s7 = await hiraGet(HOSP_ASM_BASE, OP_HOSP_ASM, key, { ykiho: ykA, numOfRows: 10, pageNo: 1 });
-        rec('S7_hospAsm(적정성평가)', s7); await sleep(GAP);
-        // S7-b : ykiho 없이 (전체 목록 페이징 동작 확인)
-        const s7b = await hiraGet(HOSP_ASM_BASE, OP_HOSP_ASM, key, { numOfRows: 5, pageNo: 1 });
-        rec('S7b_hospAsm_noYkiho', s7b); await sleep(GAP);
+        const ha = await resolveService(HOSP_ASM_CANDIDATES, key, { ykiho: ykA, numOfRows: 3, pageNo: 1 }, GAP);
+        out.calls += ha.tried.length;
+        out.endpoints.hospAsm = { resolved: ha.resolved, tried: ha.tried };
+        if (ha.resolved) {
+          const HA = ha.resolved;
+          const s7 = await hiraGet(HA.base, HA.op, key, { ykiho: ykA, numOfRows: 10, pageNo: 1 }, 3);
+          rec('S7_hospAsm(적정성평가)', s7); await sleep(GAP);
+          const s7b = await hiraGet(HA.base, HA.op, key, { numOfRows: 5, pageNo: 1 }, 3);
+          rec('S7b_hospAsm_noYkiho', s7b); await sleep(GAP);
+
+          // ── S9a: 평가정보 없는 요양병원 사례 ──
+          for (let i = 1; i < Math.min(list.length, 4); i++) {
+            const yk = ykOf(list[i]);
+            if (!yk) continue;
+            const r = await hiraGet(HA.base, HA.op, key, { ykiho: yk, numOfRows: 10, pageNo: 1 }, 3);
+            out.calls += 1;
+            await sleep(GAP);
+            const it0 = (r.items && r.items[0]) || {};
+            const hasAsm10 = it0.asmGrd10 != null && it0.asmGrd10 !== '';
+            out.samples[`S9a_asm_check_${i}`] = {
+              resultCode: r.resultCode, totalCount: r.totalCount, itemCount: r.itemCount,
+              asmGrd10: it0.asmGrd10 ?? null, fields: r.firstItemFields,
+              interpretation: r.itemCount === 0 ? '평가정보 없음(빈 목록)' : hasAsm10 ? 'asmGrd10 있음' : 'asmGrd10 없음/빈값',
+            };
+            if (r.itemCount === 0 || !hasAsm10) { out.notes.push(`S9-① 평가없음/asmGrd10없음: list[${i}]`); break; }
+          }
+        } else {
+          out.notes.push('병원평가정보서비스 후보 모두 실패');
+        }
       }
 
-      // ---- S8 : 좌표 있는/없는 기관 대조 ----
+      // ── S8: 좌표 있는/없는 기관 대조 ──
       out.samples['S8_coord_withCoord_fromS1'] = withCoord
-        ? { ykiho: '(있음)', XPos: withCoord.XPos ?? withCoord.xPos, YPos: withCoord.YPos ?? withCoord.yPos, addr: withCoord.addr }
+        ? { XPos: withCoord.XPos ?? withCoord.xPos ?? null, YPos: withCoord.YPos ?? withCoord.yPos ?? null, addr: withCoord.addr ?? null }
         : { note: 'S1 5건에 좌표 있는 기관 없음' };
       if (noCoordIn5) {
-        out.samples['S8_coord_noCoord_fromS1'] = { note: 'S1 5건 중 좌표 없는 기관 발견', addr: noCoordIn5.addr };
-      } else {
-        // 좌표 없는 기관 탐색: numOfRows 크게, XPos 비어있는 것 찾기 (최대 2페이지)
+        out.samples['S8_coord_noCoord_fromS1'] = { note: 'S1 5건 중 좌표 없는 기관', addr: noCoordIn5.addr ?? null };
+      } else if (ykA) {
         let found = null;
         for (let page = 1; page <= 2 && !found; page++) {
-          const scan = await hiraGet(HOSP_INFO_BASE, OP_HOSP_LIST, key, { clCd: '28', numOfRows: 50, pageNo: page }, 50);
+          const scan = await hiraGet(HB.base, HB.op, key, { clCd: '28', numOfRows: 50, pageNo: page }, 50);
           out.calls += 1;
           await sleep(GAP);
           const items = Array.isArray(scan.items) ? scan.items : [];
@@ -308,27 +378,8 @@ export default async function handler(req, res) {
           found = items.find((it) => !((it.XPos && it.XPos !== '') || (it.xPos && it.xPos !== '')));
         }
         out.samples['S8_coord_noCoord_search'] = found
-          ? { note: '좌표 없는 요양병원 발견', addr: found.addr, ykiho: '(있음)' }
+          ? { note: '좌표 없는 요양병원 발견', addr: found.addr ?? null }
           : { note: 'scan 100건 내 좌표 없는 요양병원 못 찾음 (전수 아님)' };
-      }
-
-      // ---- S9-① 평가정보 없음 : S1 목록의 다른 ykiho 로 평가조회, asmGrd10 없는 사례 찾기 ----
-      if (list.length > 1) {
-        for (let i = 1; i < Math.min(list.length, 4); i++) {
-          const yk = ykOf(list[i]);
-          if (!yk) continue;
-          const r = await hiraGet(HOSP_ASM_BASE, OP_HOSP_ASM, key, { ykiho: yk, numOfRows: 10, pageNo: 1 });
-          out.calls += 1;
-          await sleep(GAP);
-          const it0 = (r.items && r.items[0]) || {};
-          const hasAsm10 = it0.asmGrd10 != null && it0.asmGrd10 !== '';
-          out.samples[`S9a_asm_check_${i}`] = {
-            resultCode: r.resultCode, totalCount: r.totalCount, itemCount: r.itemCount,
-            asmGrd10: it0.asmGrd10 ?? null, fields: r.firstItemFields,
-            interpretation: r.itemCount === 0 ? '평가정보 없음(빈 목록)' : hasAsm10 ? 'asmGrd10 있음' : 'asmGrd10 없음/빈값',
-          };
-          if (r.itemCount === 0 || !hasAsm10) { out.notes.push(`S9-① 평가없음/asmGrd10없음 사례: list[${i}]`); break; }
-        }
       }
 
       out.finishedAt = new Date().toISOString();
@@ -338,7 +389,6 @@ export default async function handler(req, res) {
 
     res.status(400).json({ error: 'unknown_mode', allowed: ['check', 'run', 'one'] });
   } catch (e) {
-    // stack/URL 없이
     res.status(500).json({ error: 'probe_failed', detail: String((e && e.message) || e).slice(0, 200) });
   }
 }
