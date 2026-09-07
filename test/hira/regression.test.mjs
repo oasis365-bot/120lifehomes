@@ -24,12 +24,20 @@ test('adapter 는 domain=HOSPITAL 만 생성 (001 CHECK 값과 일치, LTC 아�
   assert.notEqual(n.domain, 'LTC');
 });
 
-test('새 lib/hira 모듈은 lib/db 를 import 하지 않는다 (DB write 불가 보장)', () => {
-  for (const f of ['client.js', 'parse.js', 'adapter.js', 'collect.js']) {
+test('lib/hira 모듈은 lib/db 를 import 하지 않는다 (persist 는 sb 주입 방식)', () => {
+  for (const f of ['client.js', 'parse.js', 'adapter.js', 'collect.js', 'persist.js']) {
     const src = read(`lib/hira/${f}`);
     assert.equal(/from ['"].*\/db\.js['"]/.test(src), false, `${f} 가 db.js import`);
-    assert.equal(/\bsb\s*\(/.test(src), false, `${f} 가 sb() 호출`);
   }
+});
+
+test('1B-3A: api/hospital/ingest.js 는 HOSPITAL_INGEST_PERSIST 게이트 뒤에서만 persist', () => {
+  const src = read('api/hospital/ingest.js');
+  assert.ok(src.includes("env.HOSPITAL_INGEST_PERSIST !== '1'"), 'persist 게이트 없음');
+  assert.ok(src.includes('persist_disabled'), '비활성 응답 없음');
+  assert.ok(src.includes('assertPreviewDb') || src.includes('assertDb'), '운영 DB 안전점검 없음');
+  // dryRun 기본 true (dryRun=false 만 persist 경로)
+  assert.ok(src.includes("String(q.dryRun) === 'false'"));
 });
 
 test('기존 요양원 수집기/정규화 파일은 이 브랜치에서 변경되지 않음', () => {

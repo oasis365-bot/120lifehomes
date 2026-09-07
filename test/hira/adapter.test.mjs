@@ -121,9 +121,11 @@ test('7. 빈 좌표 / 비정상 좌표 → NULL + 경고', () => {
 test('8. asmGrd10 — 1~5 / 등급제외 / 빈 값', () => {
   const basis = first('hospBasisList_clCd28.json');
 
+  assert.equal(EVAL_GRADE_SCALE, 'HIRA_1_5'); // 확정: HIRA 는 이 한 값만
+
   const g4 = normalizeEvaluationRecord({ basis, evalItem: first('hospAsm_withGrade.json') });
   assert.equal(g4.grade, '4');
-  assert.equal(g4.grade_scale, EVAL_GRADE_SCALE);
+  assert.equal(g4.grade_scale, 'HIRA_1_5');
   assert.equal(g4.evaluation_year, null); // ⚠️ 추측 금지
   assert.equal(g4.evaluation_authority, 'HIRA');
   assert.equal(g4.facility_id, 'H-' + g4.external_id);
@@ -132,7 +134,8 @@ test('8. asmGrd10 — 1~5 / 등급제외 / 빈 값', () => {
     basis,
     evalItem: parseHiraResponse(RAW.JSON_ASM_EXCLUDED).items[0],
   });
-  assert.equal(excl.grade, '등급제외');
+  assert.equal(excl.grade, '등급제외'); // 원문 보존
+  assert.equal(excl.grade_scale, 'HIRA_1_5'); // 등급제외도 동일 scale
 
   const none = normalizeEvaluationRecord({
     basis,
