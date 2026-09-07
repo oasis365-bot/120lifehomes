@@ -1,6 +1,6 @@
-# 요양병원(HIRA) 어댑터 테스트 — feature/hospital-hira-adapter 전용
+# 요양병원(HIRA) 어댑터 + lib/db 키호환 테스트 — feature/hospital-hira-adapter 전용
 #  · 시크릿 없음 (DATA_GO_KR_KEY / SUPABASE_* 미사용). API 실호출·DB 접근 없음.
-#  · node --test (Node 20.x = 20.11+ 내장 러너). 무의존성.
+#  · node --test (Node 20.x = 20.14+ 내장 러너, glob 지원). 무의존성.
 #  · main / production / 배포에 영향 없음.
 name: hira-tests
 
@@ -22,10 +22,10 @@ jobs:
         with:
           node-version: '20'
 
-      - name: node version (must be >= 20.11 for recursive --test)
+      - name: node version (must be >= 20.14 for --test glob)
         run: |
           node --version
-          node -e 'const [maj,min]=process.versions.node.split(".").map(Number); if(maj<20||(maj===20&&min<11)){console.error("need >= 20.11");process.exit(1)}'
+          node -e 'const [maj,min]=process.versions.node.split(".").map(Number); if(maj<20||(maj===20&&min<14)){console.error("need >= 20.14");process.exit(1)}'
 
       - name: syntax check (node --check on all api/ + lib/)
         run: |
@@ -36,7 +36,6 @@ jobs:
           done
           exit $fail
 
-      - name: unit tests (node --test test/hira/)
-        # test/hira/ 만 대상 — test/compare_facilities_api.mjs 는 라이브 URL 인자 필요한
-        # 별도 통합 스크립트라 유닛 러너에서 제외.
-        run: node --test test/hira/
+      - name: unit tests (node --test "test/**/*.test.mjs")
+        # *.test.mjs 만 대상 — test/compare_facilities_api.mjs (라이브 URL 인자 필요) 는 제외됨.
+        run: node --test "test/**/*.test.mjs"
