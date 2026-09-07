@@ -1,6 +1,6 @@
 # 요양병원(HIRA) 어댑터 + lib/db 키호환 테스트 — feature/hospital-hira-adapter 전용
 #  · 시크릿 없음 (DATA_GO_KR_KEY / SUPABASE_* 미사용). API 실호출·DB 접근 없음.
-#  · node --test (Node 20.x = 20.14+ 내장 러너, glob 지원). 무의존성.
+#  · node --test (Node 20.x 내장 러너, 파일/디렉터리 명시). 무의존성.
 #  · main / production / 배포에 영향 없음.
 name: hira-tests
 
@@ -22,10 +22,10 @@ jobs:
         with:
           node-version: '20'
 
-      - name: node version (must be >= 20.14 for --test glob)
+      - name: node version (>= 20.11)
         run: |
           node --version
-          node -e 'const [maj,min]=process.versions.node.split(".").map(Number); if(maj<20||(maj===20&&min<14)){console.error("need >= 20.14");process.exit(1)}'
+          node -e 'const [maj,min]=process.versions.node.split(".").map(Number); if(maj<20||(maj===20&&min<11)){console.error("need >= 20.11");process.exit(1)}'
 
       - name: syntax check (node --check on all api/ + lib/)
         run: |
@@ -36,6 +36,7 @@ jobs:
           done
           exit $fail
 
-      - name: unit tests (node --test "test/**/*.test.mjs")
-        # *.test.mjs 만 대상 — test/compare_facilities_api.mjs (라이브 URL 인자 필요) 는 제외됨.
-        run: node --test "test/**/*.test.mjs"
+      - name: unit tests
+        # test/db.test.mjs + test/hira/ — test/compare_facilities_api.mjs (라이브 URL 인자 필요) 는 제외.
+        # (node 20.x 는 --test glob 미지원 → 파일/디렉터리 명시)
+        run: node --test test/db.test.mjs test/hira/

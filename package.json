@@ -6,7 +6,7 @@
   "description": "120 라이프홈즈 — 전국 요양시설 정보·리뷰 포털",
   "engines": { "node": "20.x" },
   "scripts": {
-    "test": "node --test \"test/**/*.test.mjs\"",
+    "test": "node --test test/db.test.mjs test/hira/",
     "test:hira": "node --test test/hira/"
   }
 }
