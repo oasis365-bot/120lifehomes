@@ -21,6 +21,7 @@
 import { timingSafeEqual } from 'node:crypto';
 
 export const config = { maxDuration: 60 };
+const PROBE_REV = 'r4'; // 배포 확인용 (mode=check 응답에 포함). 코드 바꿀 때 bump.
 
 // ── 엔드포인트 후보 (2021 가이드 v1 이 폐기(code 12)라 현행판 우선 probe) ──
 // 병원정보서비스: HIRA opendata(sno=713) = hospInfoService/getHospBasisList (접미사 1 없음)
@@ -130,15 +131,20 @@ async function hiraGet(base, op, key, params = {}, keep = 3) {
   const reqParams = { ...params, _type: 'json', serviceKey: '***REDACTED***' };
   let httpStatus = 0;
   let text = '';
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 7000); // 업스트림 hang 방지
   try {
-    const r = await fetch(url, { method: 'GET' });
+    const r = await fetch(url, { method: 'GET', signal: ac.signal });
     httpStatus = r.status;
     text = await r.text();
   } catch (e) {
     return {
       service: base, op, reqParams, httpStatus: 0,
-      error: 'fetch_failed', detail: String((e && e.message) || e).slice(0, 160),
+      error: ac.signal.aborted ? 'timeout_7s' : 'fetch_failed',
+      detail: String((e && e.message) || e).slice(0, 160),
     };
+  } finally {
+    clearTimeout(timer);
   }
   const clean = scrub(text, key);
   const p = parse(clean);
@@ -219,6 +225,7 @@ export default async function handler(req, res) {
   if (mode === 'check') {
     res.status(200).json({
       mode: 'check',
+      probe_rev: PROBE_REV,
       vercel_env: process.env.VERCEL_ENV || null,
       data_go_kr_key_configured: Boolean(key && key.trim()),
       cron_secret_configured: Boolean(secret),
@@ -250,10 +257,53 @@ export default async function handler(req, res) {
       return;
     }
 
+    // 의료기관별상세정보만 확정 (run 이 60s 초과 시 이걸로 S3~S6·S9c 분리 수집)
+    if (mode === 'dtl') {
+      const out = { mode: 'dtl', startedAt: new Date().toISOString(), calls: 0, endpoints: {}, samples: {}, notes: [] };
+      const rec = (name, r) => { out.samples[name] = r; out.calls += 1; };
+      const GAP = 150;
+      const HB = HOSP_INFO_CANDIDATES[0];
+      const s1 = await hiraGet(HB.base, HB.op, key, { clCd: '28', numOfRows: 3, pageNo: 1 }, 3);
+      out.calls += 1; await sleep(GAP);
+      const list = Array.isArray(s1.items) ? s1.items : [];
+      const ykA = (list.find((it) => it.ykiho) || {}).ykiho || null;
+      out.samples['ykiho_source'] = { yadmNm: (list[0] || {}).yadmNm ?? null, ykiho_present: Boolean(ykA) };
+      if (!ykA) { out.notes.push('ykiho 미확보'); out.finishedAt = new Date().toISOString(); res.status(200).json(out); return; }
+
+      let dtl = null;
+      const tried = [];
+      for (const c of DTL_CANDIDATES) {
+        const op = dtlOp(DTL_OPS.dtl, c.v);
+        const r = await hiraGet(c.base, op, key, { ykiho: ykA, numOfRows: 5, pageNo: 1 }, 8);
+        out.calls += 1;
+        tried.push({ base: c.base, op, httpStatus: r.httpStatus, resultCode: r.resultCode, resultMsg: r.resultMsg, error: r.error });
+        await sleep(GAP);
+        if (endpointAlive(r)) { dtl = { base: c.base, v: c.v }; out.samples['S9c_detail(세부·폐업여부)'] = r; break; }
+      }
+      out.endpoints.dtl = { resolved: dtl, tried };
+      if (dtl) {
+        const s3 = await hiraGet(dtl.base, dtlOp(DTL_OPS.eqp, dtl.v), key, { ykiho: ykA, numOfRows: 10, pageNo: 1 }, 8);
+        rec('S3_eqp(시설·병상)', s3); await sleep(GAP);
+        const s4 = await hiraGet(dtl.base, dtlOp(DTL_OPS.spcSbjt, dtl.v), key, { ykiho: ykA, numOfRows: 20, pageNo: 1 }, 8);
+        rec('S4_spcSbjt(전문의수)', s4); await sleep(GAP);
+        const s5 = await hiraGet(dtl.base, dtlOp(DTL_OPS.dgsbjt, dtl.v), key, { ykiho: ykA, numOfRows: 30, pageNo: 1 }, 8);
+        rec('S5_dgsbjt(진료과목)', s5); await sleep(GAP);
+        const s6 = await hiraGet(dtl.base, dtlOp(DTL_OPS.medOft, dtl.v), key, { ykiho: ykA, numOfRows: 30, pageNo: 1 }, 8);
+        rec('S6_medOft(의료장비)', s6); await sleep(GAP);
+        const s9e = await hiraGet(dtl.base, dtlOp(DTL_OPS.etc, dtl.v), key, { ykiho: ykA, numOfRows: 10, pageNo: 1 }, 8);
+        rec('S9c_etc(기타인력)', s9e);
+      } else {
+        out.notes.push('의료기관별상세정보 후보 모두 실패');
+      }
+      out.finishedAt = new Date().toISOString();
+      res.status(200).json(out);
+      return;
+    }
+
     if (mode === 'run') {
       const out = { mode: 'run', startedAt: new Date().toISOString(), calls: 0, endpoints: {}, samples: {}, notes: [] };
       const rec = (name, r) => { out.samples[name] = r; out.calls += 1; };
-      const GAP = 250; // ms ≈4tps
+      const GAP = 150; // ms
 
       // ── 1) 병원정보서비스 엔드포인트 확정 ──
       const hi = await resolveService(HOSP_INFO_CANDIDATES, key, { clCd: '28', numOfRows: 3, pageNo: 1 }, GAP);
