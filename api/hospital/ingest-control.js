@@ -53,8 +53,13 @@ const C_FLASH = '__Host-ic_flash';
 const hmac = (secret, msg) => createHmac('sha256', String(secret)).update(String(msg)).digest('hex');
 
 function eqHex(aHex, bHex) {
-  const a = Buffer.from(String(aHex || ''), 'hex');
-  const b = Buffer.from(String(bHex || ''), 'hex');
+  const A = String(aHex || '');
+  const B = String(bHex || '');
+  // 엄격 hex — Buffer.from(...,'hex') 는 잘못된 문자를 조용히 잘라내므로 사전 검증
+  if (!A || A.length % 2 || A.length !== B.length) return false;
+  if (!/^[0-9a-fA-F]+$/.test(A) || !/^[0-9a-fA-F]+$/.test(B)) return false;
+  const a = Buffer.from(A, 'hex');
+  const b = Buffer.from(B, 'hex');
   if (a.length === 0 || a.length !== b.length) return false;
   try { return timingSafeEqual(a, b); } catch { return false; }
 }
@@ -178,8 +183,9 @@ export function decideAvailability(state) {
     s.persistEnabled === true &&
     s.hospitalModule === false &&
     s.ltcCount === 0;
-  const overfilled = typeof s.hospitalCount === 'number' && s.hospitalCount > 3;
-  const hardBlock = !clean || overfilled;
+  const countKnown = typeof s.hospitalCount === 'number';
+  const overfilled = countKnown && s.hospitalCount > 3;
+  const hardBlock = !clean || overfilled || !countKnown; // 개수 미상 → fail-closed
   return {
     clean,
     overfilled,
