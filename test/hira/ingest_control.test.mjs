@@ -284,6 +284,47 @@ test('GET → 200 HTML, sb 는 GET 만, runIngest 미호출, 보안 헤더', asy
   assert.match(raw, /SameSite=Strict/);
 });
 
+test('보안 헤더가 same-origin form POST 의 Origin 을 죽이지 않는 구성인지 (sandbox 없음 / no-referrer 아님)', async () => {
+  const sb = makeMockSb();
+  const res = mkRes();
+  await createHandler({ env: baseEnv(), sb, runIngest: makeRunIngestSpy(sb) })(
+    { method: 'GET', headers: { host: BRANCH_ALIAS_HOST } }, res);
+  const csp = res.headers['Content-Security-Policy'];
+  // CSP sandbox → 문서 opaque origin → form POST Origin:null. 절대 금지.
+  assert.equal(/\bsandbox\b/.test(csp), false, 'CSP 에 sandbox 지시어');
+  // Referrer-Policy: no-referrer → Fetch 표준상 non-CORS form POST 의 Origin 을 null 로 만든다.
+  assert.notEqual(res.headers['Referrer-Policy'], 'no-referrer');
+  assert.equal(res.headers['Referrer-Policy'], 'same-origin');
+  // 유지돼야 하는 방어선
+  for (const d of [
+    "default-src 'none'", "base-uri 'none'", "form-action 'self'",
+    "frame-ancestors 'none'", "script-src 'nonce-", "style-src 'nonce-",
+  ]) assert.ok(csp.includes(d), `CSP 누락: ${d}`);
+  assert.doesNotMatch(csp, /unsafe-inline/);
+  assert.equal(res.headers['X-Frame-Options'], 'DENY');
+  assert.equal(res.headers['Cache-Control'], 'no-store, max-age=0');
+  assert.match(res.headers['X-Robots-Tag'], /noindex/);
+});
+
+test('Origin:null 은 여전히 403 forbidden_origin (수정이 게이트를 완화하지 않음)', async () => {
+  const sb = makeMockSb();
+  const spy = makeRunIngestSpy(sb);
+  const h = createHandler({ env: baseEnv(), sb, runIngest: spy });
+  const { post } = await getThenPost(h, { sb, step: 'precheck', headerOverrides: { origin: 'null' } });
+  assert.equal(post.body.error, 'forbidden_origin');
+  assert.equal(post.body.diagnostics.origin_is_literal_null, true);
+  assert.equal(spy.calls.length, 0);
+});
+
+test('정확한 Origin + Sec-Fetch-Site same-origin + 정확한 Host → 통과 (302, 실행)', async () => {
+  const sb = makeMockSb();
+  const spy = makeRunIngestSpy(sb);
+  const h = createHandler({ env: baseEnv(), sb, runIngest: spy });
+  const { post } = await getThenPost(h, { sb, step: 'dryrun' }); // vercelPostHeaders = 정확한 Origin/Host/SFS
+  assert.equal(post.statusCode, 302);
+  assert.deepEqual(spy.calls, [{ dryRun: true }]);
+});
+
 test('GET HTML·쿠키에 비밀·토큰원문·URL 노출 없음', async () => {
   const sb = makeMockSb();
   const res = mkRes();

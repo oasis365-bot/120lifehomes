@@ -193,7 +193,13 @@ function securityHeaders(res, nonce) {
   res.setHeader('X-Robots-Tag', 'noindex, nofollow');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Referrer-Policy', 'no-referrer');
+  // ⚠️ 'no-referrer' 금지 — Fetch 표준상 non-CORS 이고 GET/HEAD 아닌 요청(= 이 화면의
+  //    form POST)의 Origin 헤더를 null 로 만든다("Append a request `Origin` header" 알고리즘
+  //    referrer policy switch: "no-referrer" → serializedOrigin = null). 그러면
+  //    같은 출처 제출인데도 origin_exact_match=false 로 forbidden_origin 이 뜬다.
+  //    'same-origin' 은 같은 출처 요청에만 referrer 를 붙이고 Origin 은 정상 전송한다.
+  res.setHeader('Referrer-Policy', 'same-origin');
+  // ⚠️ CSP 에 sandbox 지시어 금지 — 문서를 opaque origin 으로 만들어 위와 같은 결과.
   res.setHeader(
     'Content-Security-Policy',
     `default-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; ` +
