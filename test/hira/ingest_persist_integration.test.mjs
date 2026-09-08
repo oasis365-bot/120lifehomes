@@ -23,10 +23,14 @@ const mkRes = () => ({
 });
 const mkReq = ({ headers = {}, query = {} } = {}) => ({ headers, query });
 
+// 실제 collect — 단 retry backoff 는 즉시 (실 대기 없음)
+const fastCollect = (client, o) =>
+  collectHospitals(client, { ...o, sleepImpl: async () => {}, randomImpl: () => 0 });
+
 const realDeps = (sb, clientOpt = { listTotal: 3 }, over = {}) => ({
   env: env(),
   createClient: () => makeMockClient(clientOpt),
-  collect: collectHospitals,
+  collect: fastCollect,
   persist: persistCollected,
   sbImpl: sb,
   assertDb: async () => ({ ok: true }),
@@ -127,6 +131,47 @@ test('통합: 저장 결과 합계가 입력수와 불일치 → 500 persist_cou
   assert.equal(res.body.error, 'persist_count_mismatch');
   assert.equal(res.body.persistInputCount, 3);
   assert.equal(res.body.writeSum, 1);
+});
+
+// ── bounded retry: "정상코드 + 첫 페이지 0건" ──────────────────────
+test('통합: HIRA 첫 수집 0건 → 재시도로 3건 → 정상 적재 new=3, listRetries 1', async () => {
+  const sb = makeMockSb();
+  const res = mkRes();
+  await createHandler(realDeps(sb, { listTotal: 3, listEmptyFirst: 1 }))(
+    mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.persisted.new, 3);
+  assert.equal(res.body.stats.listRetries, 1);
+  assert.equal(sb.tables.facilities.filter((f) => f.domain === 'HOSPITAL').length, 3);
+});
+
+test('통합: HIRA 목록 3회 모두 0건 → 502(transient_empty_page_exhausted), persist 미호출, 시설 0, 로그 0', async () => {
+  const sb = makeMockSb();
+  let persistCalled = false;
+  const res = mkRes();
+  await createHandler(realDeps(sb, { listTotal: 3, listEmptyFirst: 3 }, {
+    persist: async (...a) => { persistCalled = true; return persistCollected(...a); },
+  }))(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+
+  assert.equal(res.statusCode, 502);
+  assert.equal(res.body.reason, 'transient_empty_page_exhausted');
+  assert.equal(res.body.attempts, 3);
+  assert.equal(res.body.dryRun, false);
+  assert.equal(persistCalled, false);
+  assert.equal(sb.tables.facilities.length, 0);
+  assert.equal(sb.tables.hospital_profiles.length, 0);
+  assert.equal(sb.tables.ingestion_runs.length, 0);
+  const blob = JSON.stringify(res.body);
+  assert.equal(/serviceKey|apis\.data\.go\.kr|https?:\/\/|JDQ4/.test(blob), false);
+});
+
+test('통합 dry-run: 목록 3회 모두 0건 → 502 collect_failed, ok 아님', async () => {
+  const res = mkRes();
+  await createHandler(realDeps(makeMockSb(), { listTotal: 3, listEmptyFirst: 3 }))(
+    mkReq({ headers: auth, query: { limit: '3' } }), res);
+  assert.equal(res.statusCode, 502);
+  assert.notEqual(res.body.ok, true);
+  assert.equal(res.body.reason, 'transient_empty_page_exhausted');
 });
 
 // ── _normalizedAll 전달 경로 ───────────────────────────────────────

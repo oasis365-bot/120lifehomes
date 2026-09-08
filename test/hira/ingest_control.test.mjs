@@ -813,12 +813,15 @@ test('readPreviewState: wrong DB → sb 접속 0, destOk=false', async () => {
 // 통합: control POST → 실제 ingest.js → 실제 collect(mock HIRA) → 실제 persist → mockSb
 // 1B-3B "시설 0건" 사고 회귀 고정
 // ══════════════════════════════════════════════════════════════════
+const fastCollect = (client, o) =>
+  collectHospitals(client, { ...o, sleepImpl: async () => {}, randomImpl: () => 0 });
+
 function realRunIngest(sb, clientOpt = { listTotal: 3 }, over = {}) {
   return async ({ dryRun }) => {
     const handler = ingestCreateHandler({
       env: baseEnv(),
       createClient: () => makeMockClient(clientOpt),
-      collect: collectHospitals,
+      collect: fastCollect,
       persist: persistCollected,
       sbImpl: sb,
       assertDb: async () => ({ ok: true }),
@@ -905,6 +908,60 @@ test('통합 ④: 적재 3 후 재실행 → flash ok, unchanged 3, HOSPITAL 3 �
   assert.equal(fl.detail.rowDelta.profiles, 0);
   assert.equal(fl.detail.rowDelta.sources, 0);
   assert.equal(sb.tables.ingestion_runs.length, runsBefore + 1);
+});
+
+test('통합 ③: HIRA 목록 3회 모두 0건 → flash 실패(transient_empty_page_exhausted 노출), persist 미호출, 시설 0', async () => {
+  const sb = makeMockSb();
+  const h = createHandler({ env: baseEnv(), sb, runIngest: realRunIngest(sb, { listTotal: 3, listEmptyFirst: 3 }) });
+  const { post } = await getThenPost(h, {
+    sb, step: 'ingest', confirm: CONFIRM_PHRASE,
+    extraCookies: { '__Host-ic_dr': mintToken(SECRET, 'dryrun') },
+  });
+  const fl = flashOf(post);
+  assert.equal(fl.ok, false);
+  assert.equal(fl.detail.reason, 'transient_empty_page_exhausted');
+  assert.equal(fl.detail.attempts, 3);
+  assert.equal(fl.detail.hospitalCountAfter, 0);
+  assert.equal(sb.tables.facilities.length, 0);
+  assert.equal(sb.tables.ingestion_runs.length, 0);
+});
+
+test('통합 ②: dry-run 목록 3회 모두 0건 → flash 실패, ic_dr 쿠키 미설정', async () => {
+  const sb = makeMockSb();
+  const h = createHandler({ env: baseEnv(), sb, runIngest: realRunIngest(sb, { listTotal: 3, listEmptyFirst: 3 }) });
+  const { post } = await getThenPost(h, { sb, step: 'dryrun' });
+  const fl = flashOf(post);
+  assert.equal(fl.ok, false);
+  assert.equal(fl.detail.reason, 'transient_empty_page_exhausted');
+  assert.equal(cookiesOf(post)['__Host-ic_dr'], undefined); // dry-run 실패 → 진행 토큰 없음
+});
+
+test('통합 ③: 첫 수집 0건 → 재시도로 3건 → flash ok, HOSPITAL 3', async () => {
+  const sb = makeMockSb();
+  const h = createHandler({ env: baseEnv(), sb, runIngest: realRunIngest(sb, { listTotal: 3, listEmptyFirst: 1 }) });
+  const { post } = await getThenPost(h, {
+    sb, step: 'ingest', confirm: CONFIRM_PHRASE,
+    extraCookies: { '__Host-ic_dr': mintToken(SECRET, 'dryrun') },
+  });
+  const fl = flashOf(post);
+  assert.equal(fl.ok, true);
+  assert.equal(fl.detail.persisted.new, 3);
+  assert.equal(sb.tables.facilities.filter((f) => f.domain === 'HOSPITAL').length, 3);
+});
+
+test('화면에 "다시 눌러" 자동 안내 없음 + 실패 시 "중단·보고" 안내', async () => {
+  const sb = makeMockSb();
+  const h = createHandler({ env: baseEnv(), sb, runIngest: realRunIngest(sb, { listTotal: 3, listEmptyFirst: 3 }) });
+  const { post } = await getThenPost(h, {
+    sb, step: 'ingest', confirm: CONFIRM_PHRASE,
+    extraCookies: { '__Host-ic_dr': mintToken(SECRET, 'dryrun') },
+  });
+  const g = mkRes();
+  await h({ method: 'GET', headers: { host: BRANCH_ALIAS_HOST, cookie: cookieHeader(cookiesOf(post)) } }, g);
+  assert.doesNotMatch(g.html, /다시\s*눌러\s*재시도|자동.*재시도.*하세요/);
+  assert.match(g.html, /버튼을 다시 누르지 말고/);
+  // 전체 소스에도 "③을 다시" 류 자동 재시도 유도 문구 없음
+  assert.doesNotMatch(g.html, /③.{0,4}다시.{0,4}(눌|실행)/);
 });
 
 test('통합: control flash detail 에 ykiho·raw·URL·키 없음 (익명 숫자만)', async () => {

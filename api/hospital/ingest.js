@@ -161,9 +161,14 @@ export function createHandler(deps = {}) {
           ...safe,
         });
       } catch (e) {
+        const info = e instanceof HiraError
+          ? { reason: e.reason, op: e.op, attempts: e.attempts, lastResultCode: e.lastResultCode }
+          : {};
         res.status(502).json({
           error: 'ingest_failed',
+          dryRun: false,
           detail: scrubToken(String((e && e.message) || e).slice(0, 200)),
+          ...info,
         });
       }
       return;

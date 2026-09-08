@@ -345,9 +345,13 @@ function renderPage({ nonce, csrf, state, avail, drReady, flash }) {
 
   let flashHtml = '';
   if (flash) {
+    const stopNote = flash.ok
+      ? ''
+      : '<p class="note bad">실패/차단되었습니다. 버튼을 다시 누르지 말고, 위 <code>코드</code> 와 숫자를 그대로 보고하세요.</p>';
     flashHtml = `<section class="flash ${flash.ok ? 'ok' : 'bad'}">
       <h2>직전 실행 결과 — ${esc(flash.step)} · ${flash.ok ? '성공' : '실패/차단'}</h2>
       <p>코드: <code>${esc(flash.code || '')}</code></p>
+      ${stopNote}
       <pre>${esc(JSON.stringify(flash.detail || {}, null, 2))}</pre>
     </section>`;
   }
@@ -558,22 +562,35 @@ export function createHandler(deps = {}) {
       try { r = await runIngest({ dryRun: true }); }
       catch { blocked('dryrun_error'); return; }
       if (r.status !== 200 || !r.body || r.body.ok !== true) {
-        blocked('dryrun_failed', { http: r.status });
+        const b = (r && r.body) || {};
+        const ec = typeof b.error === 'string' ? b.error : null;
+        blocked(ec || 'dryrun_failed', {
+          http: r.status,
+          errorCode: ec,
+          reason: typeof b.reason === 'string' ? b.reason : null,
+          attempts: intOrNull(b.attempts),
+        });
         return;
       }
       const st = r.body.stats || {};
+      const normalizedN = Number.isFinite(st.normalized) ? st.normalized : null;
+      const dedupedN = Number.isFinite(st.deduped) ? st.deduped : null;
+      const detail = {
+        http: r.status, dbWrites: r.body.dbWrites === 0 ? 0 : r.body.dbWrites,
+        deduped: dedupedN,
+        normalized: normalizedN,
+        apiCalls: Number.isFinite(st.apiCalls) ? st.apiCalls : null,
+        listRetries: Number.isFinite(st.listRetries) ? st.listRetries : null,
+        warnings: Array.isArray(r.body.warnings) ? r.body.warnings.length : 0,
+        failures: Array.isArray(r.body.failures) ? r.body.failures.length : 0,
+      };
+      // dry-run 도 "정확히 REQUIRED_LIMIT 건 정규화" 여야 진행 토큰(ic_dr)을 준다.
+      if (normalizedN !== REQUIRED_LIMIT) {
+        blocked('dryrun_incomplete', detail);
+        return;
+      }
       done(
-        {
-          t: tNow, step, ok: true, code: 'ok',
-          detail: {
-            http: r.status, dbWrites: r.body.dbWrites === 0 ? 0 : r.body.dbWrites,
-            deduped: Number.isFinite(st.deduped) ? st.deduped : null,
-            normalized: Number.isFinite(st.normalized) ? st.normalized : null,
-            apiCalls: Number.isFinite(st.apiCalls) ? st.apiCalls : null,
-            warnings: Array.isArray(r.body.warnings) ? r.body.warnings.length : 0,
-            failures: Array.isArray(r.body.failures) ? r.body.failures.length : 0,
-          },
-        },
+        { t: tNow, step, ok: true, code: 'ok', detail },
         [setCookie(C_DR, mintToken(secret, 'dryrun', tNow), Math.floor(DR_TTL_MS / 1000))]
       );
       return;
@@ -609,6 +626,8 @@ export function createHandler(deps = {}) {
           detail: {
             http: r.status,
             errorCode: errCode,
+            reason: typeof b.reason === 'string' ? b.reason : null,
+            attempts: intOrNull(b.attempts),
             persisted,
             collectedCount: intOrNull(b.collectedCount),
             normalizedCount: intOrNull(b.normalizedCount),

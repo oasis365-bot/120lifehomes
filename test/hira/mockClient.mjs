@@ -11,16 +11,22 @@ const fx = (name) =>
 
 /**
  * @param {Object} [opt]
- * @param {number} [opt.listTotal=5]     목록에 담을 (중복 포함) 항목 수
- * @param {number} [opt.dupEvery]        n번째마다 ykiho 중복 삽입
- * @param {Set<string>} [opt.failSteps]  이 step 이름은 항상 throw ('facility'|'evaluation'...)
- * @param {Set<string>} [opt.emptySteps] 이 step 은 빈 결과 반환
+ * @param {number} [opt.listTotal=5]        목록에 담을 (중복 포함) 항목 수
+ * @param {number} [opt.dupEvery]           n번째마다 ykiho 중복 삽입
+ * @param {Set<string>} [opt.failSteps]     이 step 이름은 항상 throw ('facility'|'evaluation'...)
+ * @param {Set<string>} [opt.emptySteps]    이 step 은 빈 결과 반환
+ * @param {number} [opt.listEmptyFirst=0]   처음 N 번의 listHospitals 호출은 "정상 resultCode + 0건" 반환
+ * @param {number|null} [opt.listEmptyTotal]  위 빈 응답이 보고할 totalCount (기본 listTotal, null 이면 totalCount 미포함)
+ * @param {number} [opt.listThrowFirst=0]   처음 N 번의 listHospitals 호출은 throw
+ * @param {Object<number,number>} [opt.emptyOnPage]  { pageNo: 횟수 } — 해당 pageNo 의 처음 N 번 호출은 0건 반환
  */
 export function makeMockClient(opt = {}) {
   const listItems = fx('hospBasisList_clCd28.json').items;
   const calls = [];
   const failSteps = opt.failSteps ?? new Set();
   const emptySteps = opt.emptySteps ?? new Set();
+  let listCallNo = 0;
+  const pageEmptyBudget = { ...(opt.emptyOnPage || {}) };
 
   const guard = (step, parsed) => {
     calls.push(step);
@@ -39,7 +45,27 @@ export function makeMockClient(opt = {}) {
     calls,
     endpoints: HIRA_ENDPOINTS,
     async listHospitals({ pageNo = 1, numOfRows = 100 } = {}) {
+      listCallNo += 1;
       calls.push(`list:p${pageNo}`);
+      if (opt.listThrowFirst && listCallNo <= opt.listThrowFirst) {
+        const e = new Error('mock list gateway error');
+        e.reason = 'gateway';
+        throw e;
+      }
+      const emptyN = opt.listEmptyFirst ?? 0;
+      const pageBudget = Number(pageEmptyBudget[pageNo]) > 0;
+      if ((emptyN && listCallNo <= emptyN) || pageBudget) {
+        if (pageBudget) pageEmptyBudget[pageNo] -= 1;
+        const total = opt.listEmptyTotal === null
+          ? undefined
+          : (opt.listEmptyTotal ?? (opt.listTotal ?? 5));
+        const r = {
+          format: 'json', gatewayError: false, resultCode: '00', resultMsg: 'NORMAL SERVICE.',
+          numOfRows, pageNo, items: [],
+        };
+        if (total !== undefined) r.totalCount = total;
+        return r;
+      }
       const n = opt.listTotal ?? 5;
       const pool = [];
       for (let i = 0; i < n; i++) {
