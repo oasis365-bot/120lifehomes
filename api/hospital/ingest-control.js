@@ -113,6 +113,43 @@ const setCookie = (name, value, maxAge) =>
   `${name}=${encodeURIComponent(value)}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=${maxAge}`;
 const clearCookie = (name) => setCookie(name, '', 0);
 
+// ── Origin 헤더를 new URL() 로 파싱해 구성요소별 boolean/분류값만 산출 ──
+// 원본 Origin 문자열·전체 URL 은 절대 반환하지 않는다. 게이트에는 쓰지 않는다(진단 전용).
+export function originUrlDiagnostics(originRaw, expectedHost = BRANCH_ALIAS_HOST) {
+  const raw = typeof originRaw === 'string' ? originRaw : '';
+  const out = {
+    origin_is_literal_null: raw === 'null',
+    origin_parseable: false,
+    origin_protocol_https: false,
+    origin_hostname_exact: false,
+    origin_port_empty: false,
+    origin_username_empty: false,
+    origin_password_empty: false,
+    origin_path_root_or_empty: false,
+    origin_query_empty: false,
+    origin_hash_empty: false,
+    origin_matches_https_host_after_safe_url_normalization: false,
+  };
+  if (!raw || out.origin_is_literal_null) return out;
+
+  let u;
+  try { u = new URL(raw); } catch { return out; }
+  out.origin_parseable = true;
+  out.origin_protocol_https = u.protocol === 'https:';
+  out.origin_hostname_exact = u.hostname === expectedHost;
+  out.origin_port_empty = u.port === '';
+  out.origin_username_empty = u.username === '';
+  out.origin_password_empty = u.password === '';
+  out.origin_path_root_or_empty = u.pathname === '' || u.pathname === '/';
+  out.origin_query_empty = u.search === '';
+  out.origin_hash_empty = u.hash === '';
+  out.origin_matches_https_host_after_safe_url_normalization =
+    out.origin_protocol_https && out.origin_hostname_exact && out.origin_port_empty &&
+    out.origin_username_empty && out.origin_password_empty && out.origin_path_root_or_empty &&
+    out.origin_query_empty && out.origin_hash_empty;
+  return out;
+}
+
 // ── same-origin 판정 진단 (boolean 만 — 원본 Host/Origin/Referer 값은 절대 반환하지 않음) ──
 // forbidden_host / forbidden_origin 오류에만 첨부. 정상 응답에는 넣지 않는다.
 export function originDiagnostics(req) {
@@ -142,6 +179,8 @@ export function originDiagnostics(req) {
     referer_exact_origin: refererOrigin === EXPECT_ORIGIN,
     sec_fetch_site_same_origin: secFetchSite === 'same-origin',
     method_is_post: method === 'POST',
+    // Origin URL 구성요소 분해 (진단 전용, 게이트 미반영)
+    ...originUrlDiagnostics(origin),
   };
 }
 

@@ -9,6 +9,7 @@ import {
   internalIngestQuery,
   readPreviewState,
   originDiagnostics,
+  originUrlDiagnostics,
   BRANCH_ALIAS_HOST,
   CONFIRM_PHRASE,
   REQUIRED_LIMIT,
@@ -400,16 +401,95 @@ test('originDiagnostics: boolean 만, 원본 값 없음', () => {
       origin: ORIGIN, referer: `${ORIGIN}/x`, 'sec-fetch-site': 'same-origin',
     },
   });
-  assert.deepEqual(d, {
-    host_present: true, host_exact_match: true,
-    forwarded_host_present: true, forwarded_host_exact_match: true,
-    origin_present: true, origin_exact_match: true,
-    referer_present: true, referer_exact_origin: true,
-    sec_fetch_site_same_origin: true, method_is_post: true,
-  });
+  for (const v of Object.values(d)) assert.equal(typeof v, 'boolean');
+  assert.equal(d.host_exact_match, true);
+  assert.equal(d.origin_exact_match, true);
+  assert.equal(d.origin_matches_https_host_after_safe_url_normalization, true);
   const empty = originDiagnostics({});
   for (const v of Object.values(empty)) assert.equal(typeof v, 'boolean');
   assert.equal(empty.origin_present, false);
+  assert.equal(empty.origin_is_literal_null, false);
+});
+
+// ── originUrlDiagnostics — Origin 헤더 new URL() 분해 (원본 미노출) ──
+test('originUrlDiagnostics: 정상 Origin → 전 구성요소 통과', () => {
+  const d = originUrlDiagnostics(ORIGIN);
+  assert.deepEqual(d, {
+    origin_is_literal_null: false,
+    origin_parseable: true,
+    origin_protocol_https: true,
+    origin_hostname_exact: true,
+    origin_port_empty: true,
+    origin_username_empty: true,
+    origin_password_empty: true,
+    origin_path_root_or_empty: true,
+    origin_query_empty: true,
+    origin_hash_empty: true,
+    origin_matches_https_host_after_safe_url_normalization: true,
+  });
+});
+
+test('originUrlDiagnostics: literal "null" → origin_is_literal_null, 파싱 불가', () => {
+  const d = originUrlDiagnostics('null');
+  assert.equal(d.origin_is_literal_null, true);
+  assert.equal(d.origin_parseable, false);
+  assert.equal(d.origin_matches_https_host_after_safe_url_normalization, false);
+});
+
+test('originUrlDiagnostics: 빈/미상 → 전부 false (literal null 아님)', () => {
+  for (const v of ['', undefined, null, 42, {}]) {
+    const d = originUrlDiagnostics(v);
+    assert.equal(d.origin_is_literal_null, false);
+    assert.equal(d.origin_parseable, false);
+    assert.equal(d.origin_matches_https_host_after_safe_url_normalization, false);
+  }
+});
+
+test('originUrlDiagnostics: http / 다른 host / port / 인증정보 / path → 각 boolean 으로 구분', () => {
+  const http = originUrlDiagnostics(`http://${BRANCH_ALIAS_HOST}`);
+  assert.equal(http.origin_parseable, true);
+  assert.equal(http.origin_protocol_https, false);
+  assert.equal(http.origin_matches_https_host_after_safe_url_normalization, false);
+
+  const evil = originUrlDiagnostics('https://evil.example');
+  assert.equal(evil.origin_hostname_exact, false);
+  assert.equal(evil.origin_matches_https_host_after_safe_url_normalization, false);
+
+  const port = originUrlDiagnostics(`https://${BRANCH_ALIAS_HOST}:8443`);
+  assert.equal(port.origin_port_empty, false);
+  assert.equal(port.origin_matches_https_host_after_safe_url_normalization, false);
+
+  const auth = originUrlDiagnostics(`https://u:p@${BRANCH_ALIAS_HOST}`);
+  assert.equal(auth.origin_username_empty, false);
+  assert.equal(auth.origin_password_empty, false);
+
+  const sub = originUrlDiagnostics(`https://${BRANCH_ALIAS_HOST}.evil.example`);
+  assert.equal(sub.origin_hostname_exact, false);
+});
+
+test('forbidden_origin 진단에 Origin URL 분해 boolean 포함 (원본 문자열 없음)', async () => {
+  const sb = makeMockSb();
+  const spy = makeRunIngestSpy(sb);
+  const h = createHandler({ env: baseEnv(), sb, runIngest: spy });
+
+  // literal null (opaque origin 시뮬레이션)
+  const nul = await getThenPost(h, { sb, step: 'precheck', headerOverrides: { origin: 'null' } });
+  assert.equal(nul.post.body.error, 'forbidden_origin');
+  assert.equal(nul.post.body.diagnostics.origin_is_literal_null, true);
+  assert.equal(nul.post.body.diagnostics.origin_parseable, false);
+  assert.equal(nul.post.body.diagnostics.sec_fetch_site_same_origin, true);
+  assert.equal(nul.post.body.diagnostics.host_exact_match, true);
+  assert.equal(nul.post.body.diagnostics.origin_matches_https_host_after_safe_url_normalization, false);
+  for (const v of Object.values(nul.post.body.diagnostics)) assert.equal(typeof v, 'boolean');
+
+  // 다른 호스트
+  const other = await getThenPost(h, { sb, step: 'precheck', headerOverrides: { origin: 'https://preview-abc123.vercel.app' } });
+  assert.equal(other.post.body.diagnostics.origin_is_literal_null, false);
+  assert.equal(other.post.body.diagnostics.origin_parseable, true);
+  assert.equal(other.post.body.diagnostics.origin_hostname_exact, false);
+  assert.equal(JSON.stringify(other.post.body).includes('preview-abc123'), false);
+
+  assert.equal(spy.calls.length, 0);
 });
 
 test('POST CSRF 누락 / 변조 / 쿠키불일치 → 403, 실행 없음', async () => {
