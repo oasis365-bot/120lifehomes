@@ -113,6 +113,38 @@ const setCookie = (name, value, maxAge) =>
   `${name}=${encodeURIComponent(value)}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=${maxAge}`;
 const clearCookie = (name) => setCookie(name, '', 0);
 
+// ── same-origin 판정 진단 (boolean 만 — 원본 Host/Origin/Referer 값은 절대 반환하지 않음) ──
+// forbidden_host / forbidden_origin 오류에만 첨부. 정상 응답에는 넣지 않는다.
+export function originDiagnostics(req) {
+  const EXPECT_ORIGIN = `https://${BRANCH_ALIAS_HOST}`;
+  const h = (req && req.headers) || {};
+  const g = (k) => (typeof h[k] === 'string' ? h[k] : '');
+  const host = g('host');
+  const fwdHost = g('x-forwarded-host');
+  const origin = g('origin');
+  const referer = g('referer');
+  const secFetchSite = g('sec-fetch-site');
+  const method = String((req && req.method) || '').toUpperCase();
+
+  let refererOrigin = null;
+  if (referer) {
+    try { refererOrigin = new URL(referer).origin; } catch { refererOrigin = null; }
+  }
+
+  return {
+    host_present: host.length > 0,
+    host_exact_match: host === BRANCH_ALIAS_HOST,
+    forwarded_host_present: fwdHost.length > 0,
+    forwarded_host_exact_match: fwdHost === BRANCH_ALIAS_HOST,
+    origin_present: origin.length > 0,
+    origin_exact_match: origin === EXPECT_ORIGIN,
+    referer_present: referer.length > 0,
+    referer_exact_origin: refererOrigin === EXPECT_ORIGIN,
+    sec_fetch_site_same_origin: secFetchSite === 'same-origin',
+    method_is_post: method === 'POST',
+  };
+}
+
 // ── HTML ──
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -376,6 +408,8 @@ export function createHandler(deps = {}) {
   const now = deps.now ?? (() => Date.now());
 
   return async function handler(req, res) {
+    const nonce = randomBytes(16).toString('base64url');
+
     // 1) production 은 무조건 404
     if (env.VERCEL_ENV === 'production') { res.status(404).json({ error: 'not_found' }); return; }
     // 2) 활성화 스위치 없으면 404
@@ -383,14 +417,18 @@ export function createHandler(deps = {}) {
     // 3) 내부 인증 키가 없으면 CSRF 도 불가 → 중단
     const secret = env.CRON_SECRET || '';
     if (!secret) { res.status(503).json({ error: 'control_unavailable' }); return; }
-    // 4) Host 정확 일치 (부분 비교 금지)
-    if (String(req.headers?.host || '') !== BRANCH_ALIAS_HOST) {
-      res.status(403).json({ error: 'forbidden_host' });
+
+    // 4) Host 정확 일치 (부분 비교 금지). forbidden_host 는 forbidden_origin 과 별도 코드.
+    //    ※ Vercel 프록시가 host 를 내부 배포값으로 바꾸는지 여부는 아직 미확인 →
+    //      x-forwarded-host 는 게이트에 쓰지 않고 진단(diagnostics)으로만 노출한다.
+    const diag = originDiagnostics(req);
+    if (!diag.host_exact_match) {
+      securityHeaders(res, nonce);
+      res.status(403).json({ error: 'forbidden_host', diagnostics: diag });
       return;
     }
 
     const method = (req.method || 'GET').toUpperCase();
-    const nonce = randomBytes(16).toString('base64url');
     const cookies = parseCookies(req.headers?.cookie);
     const tNow = now();
 
@@ -415,9 +453,13 @@ export function createHandler(deps = {}) {
     // ── POST ──
     securityHeaders(res, nonce);
 
-    // Origin 정확 일치
-    if (String(req.headers?.origin || '') !== `https://${BRANCH_ALIAS_HOST}`) {
-      res.status(403).json({ error: 'forbidden_origin' });
+    // same-origin POST 만 허용 (완화 금지):
+    //   · Origin 헤더가 존재하고  ===  https://<branch alias>
+    //   · Sec-Fetch-Site === 'same-origin'
+    //   Origin 누락/null 은 거부. Referer 만으로 대체하지 않는다.
+    //   (SSO 활성 여부는 애플리케이션이 검증하지 않는다 — 위 두 조건은 same-origin 판정일 뿐.)
+    if (!(diag.origin_present && diag.origin_exact_match && diag.sec_fetch_site_same_origin)) {
+      res.status(403).json({ error: 'forbidden_origin', diagnostics: diag });
       return;
     }
 

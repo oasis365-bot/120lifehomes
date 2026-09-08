@@ -8,6 +8,7 @@ import {
   verifyToken,
   internalIngestQuery,
   readPreviewState,
+  originDiagnostics,
   BRANCH_ALIAS_HOST,
   CONFIRM_PHRASE,
   REQUIRED_LIMIT,
@@ -86,9 +87,31 @@ function makeRunIngestSpy(sb, opt = {}) {
   return spy;
 }
 
-async function getThenPost(handler, { sb, clock, step, confirm, tamper = {}, extraCookies = {}, omitCsrf = false, host = BRANCH_ALIAS_HOST, origin = ORIGIN, query = {} }) {
+// Vercel 프록시가 same-origin form POST 에 붙이는 헤더 조합 (실측 기준)
+const vercelPostHeaders = (over = {}) => {
+  const h = {
+    host: BRANCH_ALIAS_HOST,
+    'x-forwarded-host': BRANCH_ALIAS_HOST,
+    'x-forwarded-proto': 'https',
+    origin: ORIGIN,
+    referer: `${ORIGIN}/api/hospital/ingest-control`,
+    'sec-fetch-site': 'same-origin',
+    'sec-fetch-mode': 'navigate',
+    'sec-fetch-dest': 'document',
+  };
+  for (const [k, v] of Object.entries(over)) {
+    if (v === undefined) delete h[k];
+    else h[k] = v;
+  }
+  return h;
+};
+
+async function getThenPost(handler, {
+  sb, step, confirm, tamper = {}, extraCookies = {}, omitCsrf = false,
+  headers, headerOverrides = {}, query = {},
+}) {
   const g = mkRes();
-  await handler({ method: 'GET', headers: { host: BRANCH_ALIAS_HOST } }, g);
+  await handler({ method: 'GET', headers: { host: BRANCH_ALIAS_HOST, 'sec-fetch-site': 'none' } }, g);
   const ck = cookiesOf(g);
   const csrf = ck['__Host-ic_csrf'];
   const jar = { ...ck, ...extraCookies };
@@ -96,9 +119,10 @@ async function getThenPost(handler, { sb, clock, step, confirm, tamper = {}, ext
   const body = { step, ...(confirm !== undefined ? { confirm } : {}) };
   if (!omitCsrf) body.csrf = tamper.csrf !== undefined ? tamper.csrf : csrf;
   const p = mkRes();
+  const postHeaders = headers || vercelPostHeaders(headerOverrides);
   await handler({
     method: 'POST',
-    headers: { host, origin, cookie: cookieHeader(jar) },
+    headers: { ...postHeaders, cookie: cookieHeader(jar) },
     body: { ...body, ...query },
     query,
   }, p);
@@ -274,14 +298,118 @@ test('GET HTML·쿠키에 비밀·토큰원문·URL 노출 없음', async () => 
 // ══════════════════════════════════════════════════════════════════
 // POST: Origin / CSRF
 // ══════════════════════════════════════════════════════════════════
-test('POST 잘못된 Origin → 403, 실행 없음', async () => {
+test('POST 잘못된 Origin → 403 forbidden_origin, 실행 없음, boolean 진단만', async () => {
   const sb = makeMockSb();
   const spy = makeRunIngestSpy(sb);
   const h = createHandler({ env: baseEnv(), sb, runIngest: spy });
-  const { post } = await getThenPost(h, { sb, step: 'dryrun', origin: 'https://evil.example' });
+  const { post } = await getThenPost(h, { sb, step: 'dryrun', headerOverrides: { origin: 'https://evil.example' } });
   assert.equal(post.statusCode, 403);
   assert.equal(post.body.error, 'forbidden_origin');
   assert.equal(spy.calls.length, 0);
+  // 진단은 boolean 만, 원본 URL 없음
+  const d = post.body.diagnostics;
+  assert.equal(typeof d, 'object');
+  for (const v of Object.values(d)) assert.equal(typeof v, 'boolean');
+  assert.equal(d.origin_present, true);
+  assert.equal(d.origin_exact_match, false);
+  assert.equal(d.host_exact_match, true);
+  assert.equal(JSON.stringify(post.body).includes('evil.example'), false);
+});
+
+test('POST 유사 도메인 Origin / forwarded-host → 403 forbidden_origin', async () => {
+  const sb = makeMockSb();
+  const spy = makeRunIngestSpy(sb);
+  const h = createHandler({ env: baseEnv(), sb, runIngest: spy });
+  for (const origin of [
+    `${ORIGIN}.evil.example`,
+    `https://evil.${BRANCH_ALIAS_HOST}`,
+    `${ORIGIN}x`,
+    `http://${BRANCH_ALIAS_HOST}`,
+    'null',
+  ]) {
+    const { post } = await getThenPost(h, { sb, step: 'dryrun', headerOverrides: { origin } });
+    assert.equal(post.body.error, 'forbidden_origin', origin);
+    assert.equal(post.body.diagnostics.origin_exact_match, false);
+  }
+  assert.equal(spy.calls.length, 0);
+});
+
+test('POST Origin 누락 / Sec-Fetch-Site 누락·cross-site → 403 forbidden_origin (누락 허용 안 함)', async () => {
+  const sb = makeMockSb();
+  const spy = makeRunIngestSpy(sb);
+  const h = createHandler({ env: baseEnv(), sb, runIngest: spy });
+
+  const noOrigin = await getThenPost(h, { sb, step: 'dryrun', headerOverrides: { origin: undefined } });
+  assert.equal(noOrigin.post.body.error, 'forbidden_origin');
+  assert.equal(noOrigin.post.body.diagnostics.origin_present, false);
+
+  const noSfs = await getThenPost(h, { sb, step: 'dryrun', headerOverrides: { 'sec-fetch-site': undefined } });
+  assert.equal(noSfs.post.body.error, 'forbidden_origin');
+  assert.equal(noSfs.post.body.diagnostics.sec_fetch_site_same_origin, false);
+
+  const crossSite = await getThenPost(h, { sb, step: 'dryrun', headerOverrides: { 'sec-fetch-site': 'cross-site', origin: 'https://evil.example' } });
+  assert.equal(crossSite.post.body.error, 'forbidden_origin');
+
+  assert.equal(spy.calls.length, 0);
+});
+
+test('POST Referer 만 맞고 Origin 틀림 → 여전히 차단 (Referer 로 대체 안 함)', async () => {
+  const sb = makeMockSb();
+  const spy = makeRunIngestSpy(sb);
+  const h = createHandler({ env: baseEnv(), sb, runIngest: spy });
+  const { post } = await getThenPost(h, {
+    sb, step: 'dryrun',
+    headerOverrides: { origin: undefined, referer: `${ORIGIN}/api/hospital/ingest-control` },
+  });
+  assert.equal(post.body.error, 'forbidden_origin');
+  assert.equal(post.body.diagnostics.referer_exact_origin, true);
+  assert.equal(post.body.diagnostics.origin_present, false);
+  assert.equal(spy.calls.length, 0);
+});
+
+test('POST 정상 Vercel 프록시 헤더(Origin + forwarded-host + Sec-Fetch-Site) → 통과', async () => {
+  const sb = makeMockSb();
+  const spy = makeRunIngestSpy(sb);
+  const h = createHandler({ env: baseEnv(), sb, runIngest: spy });
+  const { post } = await getThenPost(h, { sb, step: 'dryrun' });
+  assert.equal(post.statusCode, 302); // forbidden_origin 아님
+  assert.deepEqual(spy.calls, [{ dryRun: true }]);
+});
+
+test('GET 잘못된 Host → 403 forbidden_host + boolean 진단', async () => {
+  const sb = makeMockSb();
+  const spy = makeRunIngestSpy(sb);
+  const res = mkRes();
+  await createHandler({ env: baseEnv(), sb, runIngest: spy })(
+    { method: 'GET', headers: { host: `${BRANCH_ALIAS_HOST}.evil.example`, 'x-forwarded-host': `${BRANCH_ALIAS_HOST}.evil.example` } }, res);
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.error, 'forbidden_host');
+  for (const v of Object.values(res.body.diagnostics)) assert.equal(typeof v, 'boolean');
+  assert.equal(res.body.diagnostics.host_exact_match, false);
+  assert.equal(res.body.diagnostics.forwarded_host_exact_match, false);
+  assert.equal(JSON.stringify(res.body).includes('evil.example'), false);
+  assert.equal(sb.calls.length, 0);
+  assert.equal(spy.calls.length, 0);
+});
+
+test('originDiagnostics: boolean 만, 원본 값 없음', () => {
+  const d = originDiagnostics({
+    method: 'POST',
+    headers: {
+      host: BRANCH_ALIAS_HOST, 'x-forwarded-host': BRANCH_ALIAS_HOST,
+      origin: ORIGIN, referer: `${ORIGIN}/x`, 'sec-fetch-site': 'same-origin',
+    },
+  });
+  assert.deepEqual(d, {
+    host_present: true, host_exact_match: true,
+    forwarded_host_present: true, forwarded_host_exact_match: true,
+    origin_present: true, origin_exact_match: true,
+    referer_present: true, referer_exact_origin: true,
+    sec_fetch_site_same_origin: true, method_is_post: true,
+  });
+  const empty = originDiagnostics({});
+  for (const v of Object.values(empty)) assert.equal(typeof v, 'boolean');
+  assert.equal(empty.origin_present, false);
 });
 
 test('POST CSRF 누락 / 변조 / 쿠키불일치 → 403, 실행 없음', async () => {
@@ -314,10 +442,14 @@ test('POST CSRF 만료 → 403', async () => {
   const p = mkRes();
   await h({
     method: 'POST',
-    headers: { host: BRANCH_ALIAS_HOST, origin: ORIGIN, cookie: cookieHeader(ck) },
+    headers: {
+      host: BRANCH_ALIAS_HOST, origin: ORIGIN, 'sec-fetch-site': 'same-origin',
+      cookie: cookieHeader(ck),
+    },
     body: { step: 'dryrun', csrf: ck['__Host-ic_csrf'] },
   }, p);
   assert.equal(p.statusCode, 403);
+  assert.equal(p.body.error, 'csrf'); // Origin 은 통과, CSRF 만료로 차단
   assert.equal(spy.calls.length, 0);
 });
 
