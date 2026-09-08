@@ -856,25 +856,7 @@ test('통합 ③: control ingest → ingest.js → collect(mock 3) → persist �
   assert.equal(sb.tables.hospital_profiles.length, 3);
 });
 
-test('통합 ③: HIRA 목록 0건 재현 → flash 실패 collect_count_mismatch, 어떤 시설도 안 씀', async () => {
-  const sb = makeMockSb();
-  const h = createHandler({ env: baseEnv(), sb, runIngest: realRunIngest(sb, { listTotal: 0 }) });
-  const { post } = await getThenPost(h, {
-    sb, step: 'ingest', confirm: CONFIRM_PHRASE,
-    extraCookies: { '__Host-ic_dr': mintToken(SECRET, 'dryrun') },
-  });
-  const fl = flashOf(post);
-  assert.equal(fl.ok, false);
-  assert.equal(fl.code, 'collect_count_mismatch');
-  assert.equal(fl.detail.persistInputCount, 0);
-  assert.equal(fl.detail.hospitalCountAfter, 0);
-  assert.equal(sb.tables.facilities.length, 0);
-  assert.equal(sb.tables.hospital_profiles.length, 0);
-  assert.equal(sb.tables.facility_sources.length, 0);
-  assert.equal(sb.tables.ingestion_runs.length, 0); // persist 미호출
-});
-
-test('통합 ③: collect 2건(기대 3) → flash 실패, 시설 0', async () => {
+test('통합 ③: collect 2건(기대 3) → flash 실패 collect_count_mismatch, 시설 0', async () => {
   const sb = makeMockSb();
   const h = createHandler({ env: baseEnv(), sb, runIngest: realRunIngest(sb, { listTotal: 2 }) });
   const { post } = await getThenPost(h, {

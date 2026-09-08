@@ -84,29 +84,11 @@ test('통합: 운영자 입력 컬럼은 재수집에도 보존', async () => {
   assert.equal(f2.intro, '운영자');
 });
 
-// ── 사고 재현: HIRA 목록 0건(정상 resultCode) ───────────────────────
-test('통합: HIRA 목록 0건(정상코드) → 422 collect_count_mismatch, persist 미호출, 어떤 테이블도 안 씀', async () => {
-  const sb = makeMockSb();
-  let persistCalled = false;
-  const res = mkRes();
-  await createHandler(realDeps(sb, { listTotal: 0 }, {
-    persist: async (...a) => { persistCalled = true; return persistCollected(...a); },
-  }))(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+// ── 사고 재현 / fail-closed ─────────────────────────────────────────
+// (HIRA 목록이 3회 재시도 후에도 0건이면 502 transient_empty_page_exhausted —
+//  아래 "bounded retry" 섹션에서 검증. collect_count_mismatch 는 아래 "2건만" 케이스.)
 
-  assert.equal(res.statusCode, 422);
-  assert.equal(res.body.error, 'collect_count_mismatch');
-  assert.equal(res.body.expected, 3);
-  assert.equal(res.body.persistInputCount, 0);
-  assert.equal(res.body.collectedCount, 0);
-  assert.ok(res.body.warnings >= 1); // collect 가 경고를 남김
-  assert.equal(persistCalled, false);
-  assert.equal(sb.tables.facilities.length, 0);
-  assert.equal(sb.tables.hospital_profiles.length, 0);
-  assert.equal(sb.tables.facility_sources.length, 0);
-  assert.equal(sb.tables.ingestion_runs.length, 0); // persist 미호출 → 로그도 없음
-});
-
-test('통합: collect 가 2건만(기대 3) → 422, persist 미호출, 시설 0', async () => {
+test('통합: collect 가 2건만(기대 3) → 422 collect_count_mismatch, persist 미호출, 시설 0', async () => {
   const sb = makeMockSb();
   let persistCalled = false;
   const res = mkRes();
