@@ -5,9 +5,11 @@ import { fileURLToPath } from 'node:url';
 import {
   persistCollected,
   assertPreviewDb,
+  verifyPreviewDbUrl,
   buildFacilityRow,
   buildProfileRow,
   SOURCE_SYSTEM,
+  EXPECTED_PREVIEW_DB_HOST,
 } from '../../lib/hira/persist.js';
 import { normalizeHospitalRecord, normalizeEvaluationRecord } from '../../lib/hira/adapter.js';
 import { parseHiraResponse } from '../../lib/hira/parse.js';
@@ -231,47 +233,136 @@ test('평가정보 없음 → facility_evaluations 미기록, evalMissing', asyn
 });
 
 // ══════════════════════════════════════════════════════════════════════
-// assertPreviewDb
+// verifyPreviewDbUrl — 정확한 DB 목적지 검증
 // ══════════════════════════════════════════════════════════════════════
-test('assertPreviewDb: 빈 Preview DB → ok', async () => {
+const PREVIEW_URL = `https://${EXPECTED_PREVIEW_DB_HOST}`;
+const okReason = (r) => r.ok === true;
+const bad = (r) => r.ok === false && r.reason === 'wrong_preview_db';
+
+test('verifyPreviewDbUrl: 정확한 Preview hostname → 통과', () => {
+  assert.ok(okReason(verifyPreviewDbUrl(PREVIEW_URL)));
+  assert.ok(okReason(verifyPreviewDbUrl(`${PREVIEW_URL}/`))); // 끝 슬래시 하나는 허용
+  assert.ok(okReason(verifyPreviewDbUrl(` ${PREVIEW_URL} `))); // 트림
+});
+
+test('verifyPreviewDbUrl: 운영 Supabase hostname → 거부', () => {
+  assert.ok(bad(verifyPreviewDbUrl('https://wdjqtynpqpzgiuzvphdr.supabase.co')));
+  assert.ok(bad(verifyPreviewDbUrl('https://prod.supabase.co')));
+});
+
+test('verifyPreviewDbUrl: 유사 hostname → 거부 (부분문자열/endsWith/includes 아님)', () => {
+  assert.ok(bad(verifyPreviewDbUrl(`https://${EXPECTED_PREVIEW_DB_HOST}.evil.example`)));
+  assert.ok(bad(verifyPreviewDbUrl(`https://evil.${EXPECTED_PREVIEW_DB_HOST}`)));
+  assert.ok(bad(verifyPreviewDbUrl(`https://${EXPECTED_PREVIEW_DB_HOST}x`)));
+  assert.ok(bad(verifyPreviewDbUrl(`https://x${EXPECTED_PREVIEW_DB_HOST}`)));
+  assert.ok(bad(verifyPreviewDbUrl(`https://${EXPECTED_PREVIEW_DB_HOST}.`))); // 트레일링 닷
+});
+
+test('verifyPreviewDbUrl: http / 잘못된 protocol → 거부', () => {
+  assert.ok(bad(verifyPreviewDbUrl(`http://${EXPECTED_PREVIEW_DB_HOST}`)));
+  assert.ok(bad(verifyPreviewDbUrl(`postgres://${EXPECTED_PREVIEW_DB_HOST}`)));
+  assert.ok(bad(verifyPreviewDbUrl(`ftp://${EXPECTED_PREVIEW_DB_HOST}`)));
+});
+
+test('verifyPreviewDbUrl: port / path / query / hash / 인증정보 포함 → 거부', () => {
+  assert.ok(bad(verifyPreviewDbUrl(`https://${EXPECTED_PREVIEW_DB_HOST}:5432`)));
+  assert.ok(bad(verifyPreviewDbUrl(`https://${EXPECTED_PREVIEW_DB_HOST}/rest/v1`)));
+  assert.ok(bad(verifyPreviewDbUrl(`https://${EXPECTED_PREVIEW_DB_HOST}?x=1`)));
+  assert.ok(bad(verifyPreviewDbUrl(`https://${EXPECTED_PREVIEW_DB_HOST}#frag`)));
+  assert.ok(bad(verifyPreviewDbUrl(`https://user:pass@${EXPECTED_PREVIEW_DB_HOST}`)));
+  assert.ok(bad(verifyPreviewDbUrl(`https://user@${EXPECTED_PREVIEW_DB_HOST}`)));
+});
+
+test('verifyPreviewDbUrl: 미설정 / 형식 오류 → 거부', () => {
+  for (const v of ['', '   ', undefined, null, 42, {}, 'not a url', 'sojxqkwdkpkifpxvzexz.supabase.co', '//sojxqkwdkpkifpxvzexz.supabase.co']) {
+    assert.ok(bad(verifyPreviewDbUrl(v)), `허용됨: ${JSON.stringify(v)}`);
+  }
+});
+
+test('verifyPreviewDbUrl: 실패 reason 은 wrong_preview_db 뿐, URL·ref 없음', () => {
+  const r = verifyPreviewDbUrl('https://wdjqtynpqpzgiuzvphdr.supabase.co/rest/v1?token=abc#x');
+  assert.equal(r.reason, 'wrong_preview_db');
+  assert.ok(!/supabase|http|wdjq|token|sojxq|\d{3,}/.test(r.reason));
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// assertPreviewDb  (verifyPreviewDbUrl 을 step 0 으로 포함)
+// ══════════════════════════════════════════════════════════════════════
+const previewEnv = (extra = {}) => ({ VERCEL_ENV: 'preview', SUPABASE_URL: PREVIEW_URL, ...extra });
+
+test('assertPreviewDb: 정확한 URL + 빈 Preview DB → ok', async () => {
   const sb = makeMockSb();
-  // 001 스키마 테이블 존재 (mockSb 가 기본 생성) + hospital_module=false
-  const g = await assertPreviewDb({ sb, env: { VERCEL_ENV: 'preview' } });
+  const g = await assertPreviewDb({ sb, env: previewEnv() });
   assert.equal(g.ok, true);
+});
+
+test('assertPreviewDb: SUPABASE_URL 이 운영 hostname → wrong_preview_db, DB 쿼리 0', async () => {
+  const sb = makeMockSb();
+  const g = await assertPreviewDb({ sb, env: previewEnv({ SUPABASE_URL: 'https://wdjqtynpqpzgiuzvphdr.supabase.co' }) });
+  assert.equal(g.ok, false);
+  assert.equal(g.reason, 'wrong_preview_db');
+  assert.equal(sb.calls.length, 0); // 목적지 검증 전에 DB 접속 안 함
+});
+
+test('assertPreviewDb: SUPABASE_URL 미설정 → wrong_preview_db (DB 쿼리 0)', async () => {
+  const sb = makeMockSb();
+  const g = await assertPreviewDb({ sb, env: { VERCEL_ENV: 'preview' } });
+  assert.equal(g.reason, 'wrong_preview_db');
+  assert.equal(sb.calls.length, 0);
+});
+
+test('assertPreviewDb: SUPABASE_URL 에 path/port 포함 → wrong_preview_db', async () => {
+  const sb = makeMockSb();
+  assert.equal((await assertPreviewDb({ sb, env: previewEnv({ SUPABASE_URL: `${PREVIEW_URL}/rest/v1` }) })).reason, 'wrong_preview_db');
+  assert.equal((await assertPreviewDb({ sb, env: previewEnv({ SUPABASE_URL: `https://${EXPECTED_PREVIEW_DB_HOST}:6543` }) })).reason, 'wrong_preview_db');
 });
 
 test('assertPreviewDb: LTC 행 있으면(운영 DB) → 중단', async () => {
   const sb = makeMockSb({ facilities: [{ id: '11111000006', domain: 'LTC', name: '청운노인요양원' }] });
-  const g = await assertPreviewDb({ sb, env: { VERCEL_ENV: 'preview' } });
+  const g = await assertPreviewDb({ sb, env: previewEnv() });
   assert.equal(g.ok, false);
   assert.equal(g.reason, 'db_has_ltc_rows');
 });
 
 test('assertPreviewDb: hospital_module ON → 중단', async () => {
   const sb = makeMockSb({ feature_flags: [{ key: 'hospital_module', enabled: true }] });
-  const g = await assertPreviewDb({ sb, env: { VERCEL_ENV: 'preview' } });
-  assert.equal(g.ok, false);
+  const g = await assertPreviewDb({ sb, env: previewEnv() });
   assert.equal(g.reason, 'hospital_module_on');
 });
 
-test('assertPreviewDb: production 환경 → 중단', async () => {
+test('assertPreviewDb: production 환경 → 중단 (URL 검증보다 먼저)', async () => {
   const sb = makeMockSb();
-  const g = await assertPreviewDb({ sb, env: { VERCEL_ENV: 'production' } });
-  assert.equal(g.ok, false);
+  const g = await assertPreviewDb({ sb, env: previewEnv({ VERCEL_ENV: 'production' }) });
   assert.equal(g.reason, 'production_env');
 });
 
 test('assertPreviewDb: 플래그 행 없음(migration 미적용) → 중단', async () => {
   const sb = makeMockSb({ feature_flags: [] });
-  const g = await assertPreviewDb({ sb, env: { VERCEL_ENV: 'preview' } });
-  assert.equal(g.ok, false);
+  const g = await assertPreviewDb({ sb, env: previewEnv() });
   assert.equal(g.reason, 'flag_missing');
 });
 
-test('assertPreviewDb reason 에 URL·행수·키 없음', async () => {
-  const sb = makeMockSb({ facilities: [{ id: 'x', domain: 'LTC', name: 'n' }] });
-  const g = await assertPreviewDb({ sb, env: { VERCEL_ENV: 'preview', SUPABASE_URL: 'https://prod.supabase.co' } });
-  assert.ok(!/supabase\.co|https|\d{3,}/.test(g.reason));
+test('assertPreviewDb: 스키마 불완전 → schema_incomplete', async () => {
+  const sb = makeMockSb();
+  const wrap = async (p, o) => {
+    if (p.startsWith('facility_sources')) throw new Error('Supabase 404 :: relation does not exist');
+    return sb(p, o);
+  };
+  const g = await assertPreviewDb({ sb: wrap, env: previewEnv() });
+  assert.equal(g.reason, 'schema_incomplete');
+});
+
+test('assertPreviewDb: 모든 실패 reason 에 URL·ref·행수·키 없음', async () => {
+  const cases = [
+    { env: previewEnv({ VERCEL_ENV: 'production' }), sb: makeMockSb() },
+    { env: previewEnv({ SUPABASE_URL: 'https://wdjqtynpqpzgiuzvphdr.supabase.co' }), sb: makeMockSb() },
+    { env: previewEnv(), sb: makeMockSb({ facilities: [{ id: 'x', domain: 'LTC' }] }) },
+    { env: previewEnv(), sb: makeMockSb({ feature_flags: [{ key: 'hospital_module', enabled: true }] }) },
+  ];
+  for (const c of cases) {
+    const g = await assertPreviewDb({ sb: c.sb, env: c.env });
+    assert.ok(!/supabase\.co|https?:|sojxq|wdjq|token|apikey|\d{4,}/.test(g.reason || ''), `reason leak: ${g.reason}`);
+  }
 });
 
 // ══════════════════════════════════════════════════════════════════════

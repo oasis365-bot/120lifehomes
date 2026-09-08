@@ -40,6 +40,20 @@ test('1B-3A: api/hospital/ingest.js 는 HOSPITAL_INGEST_PERSIST 게이트 뒤에
   assert.ok(src.includes("String(q.dryRun) === 'false'"));
 });
 
+test('1B-3B 안전: persist.js 는 hostname 을 정확 일치(===)로만 비교', () => {
+  const src = read('lib/hira/persist.js');
+  // verifyPreviewDbUrl 존재 + URL 파싱
+  assert.ok(src.includes('function verifyPreviewDbUrl'), 'verifyPreviewDbUrl 없음');
+  assert.ok(/new URL\(/.test(src), 'URL 파싱 안 함');
+  assert.ok(/u\.hostname !== expectedHost/.test(src), 'hostname 정확 비교(!==) 없음');
+  // 부분 일치 함수 금지 (hostname 비교에)
+  assert.equal(/\.hostname[^\n]*\.(includes|endsWith|startsWith)\(/.test(src), false, 'hostname 부분 비교 사용');
+  // protocol https 확인
+  assert.ok(src.includes("u.protocol !== 'https:'"));
+  // 실패 reason 은 wrong_preview_db 만
+  assert.ok(src.includes("reason: 'wrong_preview_db'"));
+});
+
 test('기존 요양원 수집기/정규화 파일은 이 브랜치에서 변경되지 않음', () => {
   // 파일 존재 + 핵심 시그니처만 확인 (내용 변경 여부는 git diff 로 별도 검증)
   const ingest = read('api/ingest.js');

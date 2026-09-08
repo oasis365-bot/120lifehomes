@@ -161,6 +161,28 @@ test('19. persist 활성 + limit 상한 3', async () => {
   assert.equal(seen.maxInstitutions, 3);
 });
 
+test('20. persist 활성 + 실제 assertPreviewDb + 틀린 SUPABASE_URL → 409 wrong_preview_db, persist·collect 미실행', async () => {
+  let touched = false;
+  const sb = makeMockSb();
+  const res = mkRes();
+  await createHandler({
+    // assertDb 를 주입하지 않음 → 실제 assertPreviewDb 사용
+    env: { CRON_SECRET: SECRET, DATA_GO_KR_KEY: 'k', VERCEL_ENV: 'preview', HOSPITAL_INGEST_PERSIST: '1', SUPABASE_URL: 'https://wdjqtynpqpzgiuzvphdr.supabase.co' },
+    sbImpl: sb,
+    createClient: () => { touched = true; return makeMockClient({ listTotal: 5 }); },
+    collect: async () => { touched = true; return { _normalizedAll: [] }; },
+    persist: async () => { touched = true; return {}; },
+  })(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.error, 'unsafe_db');
+  assert.equal(res.body.reason, 'wrong_preview_db');
+  assert.equal(touched, false);
+  assert.equal(sb.calls.length, 0); // 목적지 틀리면 DB 접속 0
+  // 응답에 URL·ref·키 없음
+  const blob = JSON.stringify(res.body);
+  assert.ok(!/supabase\.co|https?:|wdjq|sojxq|apikey|SUPABASE/.test(blob));
+});
+
 // ── 비밀정보 비노출 ────────────────────────────────────────────────
 test('11(api). 응답에 ykiho 원문·serviceKey 없음 (dry-run)', async () => {
   const res = mkRes();
