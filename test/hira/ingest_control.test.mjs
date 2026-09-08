@@ -16,6 +16,10 @@ import {
   CSRF_TTL_MS,
 } from '../../api/hospital/ingest-control.js';
 import { EXPECTED_PREVIEW_DB_HOST } from '../../lib/hira/persist.js';
+import { createHandler as ingestCreateHandler } from '../../api/hospital/ingest.js';
+import { collectHospitals } from '../../lib/hira/collect.js';
+import { persistCollected } from '../../lib/hira/persist.js';
+import { makeMockClient } from './mockClient.mjs';
 import { makeMockSb } from './mockSb.mjs';
 
 const PREVIEW_URL = `https://${EXPECTED_PREVIEW_DB_HOST}`;
@@ -803,4 +807,113 @@ test('readPreviewState: wrong DB → sb 접속 0, destOk=false', async () => {
   const s = await readPreviewState({ sb, env: baseEnv({ SUPABASE_URL: 'https://evil.example' }) });
   assert.equal(s.destOk, false);
   assert.equal(sb.calls.length, 0);
+});
+
+// ══════════════════════════════════════════════════════════════════
+// 통합: control POST → 실제 ingest.js → 실제 collect(mock HIRA) → 실제 persist → mockSb
+// 1B-3B "시설 0건" 사고 회귀 고정
+// ══════════════════════════════════════════════════════════════════
+function realRunIngest(sb, clientOpt = { listTotal: 3 }, over = {}) {
+  return async ({ dryRun }) => {
+    const handler = ingestCreateHandler({
+      env: baseEnv(),
+      createClient: () => makeMockClient(clientOpt),
+      collect: collectHospitals,
+      persist: persistCollected,
+      sbImpl: sb,
+      assertDb: async () => ({ ok: true }),
+      ...over,
+    });
+    const cap = { status: 200, body: null };
+    await handler(
+      {
+        headers: { authorization: `Bearer ${SECRET}` },
+        query: dryRun ? { limit: '3' } : { dryRun: 'false', limit: '3' },
+      },
+      { status(c) { cap.status = c; return this; }, json(b) { cap.body = b; return this; }, setHeader() {} }
+    );
+    return cap;
+  };
+}
+
+test('통합 ③: control ingest → ingest.js → collect(mock 3) → persist → mockSb : new 3, HOSPITAL 3, flash ok', async () => {
+  const sb = makeMockSb();
+  const h = createHandler({ env: baseEnv(), sb, runIngest: realRunIngest(sb) });
+  const { post } = await getThenPost(h, {
+    sb, step: 'ingest', confirm: CONFIRM_PHRASE,
+    extraCookies: { '__Host-ic_dr': mintToken(SECRET, 'dryrun') },
+  });
+  assert.equal(post.statusCode, 302);
+  const fl = flashOf(post);
+  assert.equal(fl.ok, true);
+  assert.equal(fl.detail.persisted.new, 3);
+  assert.equal(fl.detail.persistInputCount, 3);
+  assert.equal(fl.detail.hospitalCountAfter, 3);
+  assert.equal(sb.tables.facilities.filter((f) => f.domain === 'HOSPITAL').length, 3);
+  assert.equal(sb.tables.hospital_profiles.length, 3);
+});
+
+test('통합 ③: HIRA 목록 0건 재현 → flash 실패 collect_count_mismatch, 어떤 시설도 안 씀', async () => {
+  const sb = makeMockSb();
+  const h = createHandler({ env: baseEnv(), sb, runIngest: realRunIngest(sb, { listTotal: 0 }) });
+  const { post } = await getThenPost(h, {
+    sb, step: 'ingest', confirm: CONFIRM_PHRASE,
+    extraCookies: { '__Host-ic_dr': mintToken(SECRET, 'dryrun') },
+  });
+  const fl = flashOf(post);
+  assert.equal(fl.ok, false);
+  assert.equal(fl.code, 'collect_count_mismatch');
+  assert.equal(fl.detail.persistInputCount, 0);
+  assert.equal(fl.detail.hospitalCountAfter, 0);
+  assert.equal(sb.tables.facilities.length, 0);
+  assert.equal(sb.tables.hospital_profiles.length, 0);
+  assert.equal(sb.tables.facility_sources.length, 0);
+  assert.equal(sb.tables.ingestion_runs.length, 0); // persist 미호출
+});
+
+test('통합 ③: collect 2건(기대 3) → flash 실패, 시설 0', async () => {
+  const sb = makeMockSb();
+  const h = createHandler({ env: baseEnv(), sb, runIngest: realRunIngest(sb, { listTotal: 2 }) });
+  const { post } = await getThenPost(h, {
+    sb, step: 'ingest', confirm: CONFIRM_PHRASE,
+    extraCookies: { '__Host-ic_dr': mintToken(SECRET, 'dryrun') },
+  });
+  const fl = flashOf(post);
+  assert.equal(fl.ok, false);
+  assert.equal(fl.code, 'collect_count_mismatch');
+  assert.equal(sb.tables.facilities.length, 0);
+});
+
+test('통합 ④: 적재 3 후 재실행 → flash ok, unchanged 3, HOSPITAL 3 유지, 로그만 +1', async () => {
+  const sb = makeMockSb();
+  // ③ 적재
+  await getThenPost(
+    createHandler({ env: baseEnv(), sb, runIngest: realRunIngest(sb) }),
+    { sb, step: 'ingest', confirm: CONFIRM_PHRASE, extraCookies: { '__Host-ic_dr': mintToken(SECRET, 'dryrun') } }
+  );
+  assert.equal(sb.tables.facilities.filter((f) => f.domain === 'HOSPITAL').length, 3);
+  const runsBefore = sb.tables.ingestion_runs.length;
+
+  // ④ 멱등성
+  const h = createHandler({ env: baseEnv(), sb, runIngest: realRunIngest(sb) });
+  const { post } = await getThenPost(h, { sb, step: 'idempotency', confirm: CONFIRM_PHRASE });
+  const fl = flashOf(post);
+  assert.equal(fl.ok, true);
+  assert.equal(fl.detail.persisted.unchanged, 3);
+  assert.equal(fl.detail.persisted.new, 0);
+  assert.equal(fl.detail.rowDelta.hospital, 0);
+  assert.equal(fl.detail.rowDelta.profiles, 0);
+  assert.equal(fl.detail.rowDelta.sources, 0);
+  assert.equal(sb.tables.ingestion_runs.length, runsBefore + 1);
+});
+
+test('통합: control flash detail 에 ykiho·raw·URL·키 없음 (익명 숫자만)', async () => {
+  const sb = makeMockSb();
+  const h = createHandler({ env: baseEnv(), sb, runIngest: realRunIngest(sb, { listTotal: 0 }) });
+  const { post } = await getThenPost(h, {
+    sb, step: 'ingest', confirm: CONFIRM_PHRASE,
+    extraCookies: { '__Host-ic_dr': mintToken(SECRET, 'dryrun') },
+  });
+  const blob = JSON.stringify(flashOf(post));
+  assert.equal(/serviceKey|supabase\.co|JDQ4[A-Za-z0-9+/]{16,}|Bearer/.test(blob), false);
 });

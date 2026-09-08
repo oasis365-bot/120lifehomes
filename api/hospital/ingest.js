@@ -107,15 +107,56 @@ export function createHandler(deps = {}) {
       try {
         const client = createClient({ key });
         const result = await collect(client, { maxInstitutions: limit, pageSize: 100 });
-        const items = Array.isArray(result._normalizedAll) ? result._normalizedAll : [];
-        const persisted = await persist(items, { sb: sbImpl, env });
         const { _normalizedAll, ...safe } = result;
+        const items = Array.isArray(_normalizedAll) ? _normalizedAll : [];
+
+        const collectedCount = Number.isFinite(result?.stats?.deduped) ? result.stats.deduped : null;
+        const normalizedCount = Number.isFinite(result?.stats?.normalized) ? result.stats.normalized : null;
+        const persistInputCount = items.length;
+
+        // ── fail-closed (1) : 기대 수집 수(limit) 만큼 정규화되지 않으면 persist 미호출 ──
+        //   HIRA 목록이 정상 resultCode 로 0건을 반환하는 data.go.kr 간헐 장애 대비.
+        //   시설/프로필/소스에 아무것도 쓰지 않는다.
+        if (persistInputCount !== limit) {
+          res.status(422).json({
+            error: 'collect_count_mismatch',
+            dryRun: false,
+            expected: limit,
+            collectedCount,
+            normalizedCount,
+            persistInputCount,
+            warnings: Array.isArray(safe.warnings) ? safe.warnings.length : 0,
+          });
+          return;
+        }
+
+        const persisted = await persist(items, { sb: sbImpl, env });
+        const st = persisted.stats || {};
+        const writeSum =
+          (st.new || 0) + (st.updated || 0) + (st.unchanged || 0) + (st.partial || 0) + (st.failed || 0);
+
+        // ── fail-closed (2) : 저장 결과 합계가 입력 수와 안 맞거나 persist 가 failed 면 성공 아님 ──
+        if (persisted.status === 'failed' || writeSum !== persistInputCount) {
+          res.status(500).json({
+            error: 'persist_count_mismatch',
+            dryRun: false,
+            persistStatus: persisted.status,
+            persistInputCount,
+            writeSum,
+            runId: persisted.runId,
+          });
+          return;
+        }
+
         res.status(200).json({
           ok: true,
           dryRun: false,
           runId: persisted.runId,
           persisted: persisted.stats,
           persistStatus: persisted.status,
+          collectedCount,
+          normalizedCount,
+          persistInputCount,
           failures: persisted.failures, // ykiho 마스킹됨
           ...safe,
         });

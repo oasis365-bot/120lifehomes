@@ -300,6 +300,8 @@ async function defaultRunIngest({ env, dryRun }) {
   return cap;
 }
 
+const intOrNull = (v) => (Number.isFinite(v) ? v : null);
+
 // stats 에서 정수 필드만 화이트리스트로 추출 (ykiho·raw·문자열 상세 제외)
 function safeStats(stats) {
   const s = stats && typeof stats === 'object' ? stats : {};
@@ -588,22 +590,34 @@ export function createHandler(deps = {}) {
 
       // 실행 후 재조회 (자동 재시도·자동 수정 없음 — 결과만 기록)
       const after = await readPreviewState({ sb, env });
-      const persisted = safeStats(r.body && r.body.persisted);
+      const b = (r && r.body) || {};
+      const persisted = safeStats(b.persisted);
+      const errCode = typeof b.error === 'string' ? b.error : null;
+      // 첫 적재는 new=3 이고 실제 HOSPITAL 행이 정확히 3 일 때만 성공.
       const okShape =
-        r.status === 200 && r.body && r.body.ok === true &&
+        r.status === 200 && b.ok === true &&
         persisted.new === 3 && after.hospitalCount === 3;
 
       done(
         {
-          t: tNow, step, ok: okShape, code: okShape ? 'ok'
-            : r.status !== 200 ? `http_${r.status}`
-              : after.hospitalCount !== 3 ? 'unexpected_hospital_count' : 'unexpected_persist_stats',
+          t: tNow, step, ok: okShape,
+          code: okShape ? 'ok'
+            : errCode ? errCode
+              : r.status !== 200 ? `http_${r.status}`
+                : after.hospitalCount !== 3 ? 'unexpected_hospital_count'
+                  : 'unexpected_persist_stats',
           detail: {
             http: r.status,
+            errorCode: errCode,
             persisted,
-            runId: r.body && Number.isFinite(r.body.runId) ? r.body.runId : null,
-            persistStatus: r.body && typeof r.body.persistStatus === 'string' ? r.body.persistStatus : null,
-            failures: r.body && Array.isArray(r.body.failures) ? r.body.failures.length : 0,
+            collectedCount: intOrNull(b.collectedCount),
+            normalizedCount: intOrNull(b.normalizedCount),
+            persistInputCount: intOrNull(b.persistInputCount),
+            expected: intOrNull(b.expected),
+            writeSum: intOrNull(b.writeSum),
+            runId: Number.isFinite(b.runId) ? b.runId : null,
+            persistStatus: typeof b.persistStatus === 'string' ? b.persistStatus : null,
+            failures: Array.isArray(b.failures) ? b.failures.length : 0,
             hospitalCountAfter: after.hospitalCount,
           },
         },
@@ -621,7 +635,9 @@ export function createHandler(deps = {}) {
       try { r = await runIngest({ dryRun: false }); }
       catch { blocked('ingest_error'); return; }
       const after = await countTables(sb);
-      const persisted = safeStats(r.body && r.body.persisted);
+      const b = (r && r.body) || {};
+      const persisted = safeStats(b.persisted);
+      const errCode = typeof b.error === 'string' ? b.error : null;
 
       const grewOnlyRuns =
         after.hospital === before.hospital &&
@@ -632,18 +648,22 @@ export function createHandler(deps = {}) {
         after.runs >= before.runs;
 
       const okShape =
-        r.status === 200 && r.body && r.body.ok === true &&
+        r.status === 200 && b.ok === true &&
         persisted.unchanged === 3 && persisted.new === 0 &&
         after.hospital === 3 && grewOnlyRuns;
 
       done({
         t: tNow, step, ok: okShape,
         code: okShape ? 'ok'
-          : r.status !== 200 ? `http_${r.status}`
-            : !grewOnlyRuns ? 'unexpected_row_growth'
-              : 'unexpected_persist_stats',
+          : errCode ? errCode
+            : r.status !== 200 ? `http_${r.status}`
+              : !grewOnlyRuns ? 'unexpected_row_growth'
+                : 'unexpected_persist_stats',
         detail: {
-          http: r.status, persisted,
+          http: r.status, errorCode: errCode, persisted,
+          collectedCount: intOrNull(b.collectedCount),
+          normalizedCount: intOrNull(b.normalizedCount),
+          persistInputCount: intOrNull(b.persistInputCount),
           rows: after,
           rowDelta: {
             hospital: after.hospital - before.hospital,
