@@ -178,6 +178,30 @@ test('통합: 2차 수집 목록 throw 3회 → 502 ingest_failed(list_fetch_fai
   assert.equal(/serviceKey|apis\.data\.go\.kr|https?:\/\/|JDQ4/.test(blob), false);
 });
 
+test('통합: 목록 throw → 502 응답에 failureKind/attemptSummary/elapsedBucket (allowlist), 원문·엔드포인트 없음', async () => {
+  const sb = makeMockSb();
+  const res = mkRes();
+  await createHandler(realDeps(sb, {
+    listTotal: 3, listThrowFirst: 3, listThrowReason: 'network',
+    listThrowFailureKind: 'dns', listThrowAttemptSummary: { dns: 2, timeout: 1 },
+    listThrowElapsedBucket: '5s_15s',
+  }))(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+
+  assert.equal(res.statusCode, 502);
+  assert.equal(res.body.error, 'ingest_failed');
+  assert.equal(res.body.reason, 'list_fetch_failed');
+  assert.equal(res.body.failureKind, 'dns');
+  assert.deepEqual(res.body.attemptSummary, { dns: 2, timeout: 1 });
+  assert.equal(res.body.elapsedBucket, '5s_15s');
+  assert.equal(sb.tables.facilities.length, 0);
+  assert.equal(sb.tables.ingestion_runs.length, 0);
+  const blob = JSON.stringify(res.body);
+  assert.equal(/serviceKey|apis\.data\.go\.kr|https?:\/\/|JDQ4|ykiho/i.test(blob), false);
+  // failureKind 는 반드시 allowlist 안
+  assert.ok(['timeout', 'network', 'dns', 'tls', 'http_429', 'http_5xx', 'result_code_12', 'deadline', 'unknown']
+    .includes(res.body.failureKind));
+});
+
 test('통합: 목록 회복은 client 계층에서 (첫 fetch 503 → 두 번째 200) → 정상 적재 new=3', async () => {
   const LIST_JSON = JSON.stringify({
     response: { header: { resultCode: '00' }, body: {

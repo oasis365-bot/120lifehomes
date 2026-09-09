@@ -80,6 +80,19 @@ function makeRunIngestSpy(sb, opt = {}) {
       return { status: 200, body: { ok: true, dryRun: false, runId: 9, persistStatus: 'partial', persisted: { new: 1, updated: 0, unchanged: 0, partial: 2, failed: 0 }, failures: [{ ykiho: '***', reason: 'x' }] } };
     }
     if (opt.mode === 'throw') throw new Error('boom');
+    if (opt.mode === 'list_fail') {
+      // 내부 /api/hospital/ingest 가 목록 첫 페이지 실패로 502 반환 (DB write 0)
+      return {
+        status: 502,
+        body: {
+          error: 'ingest_failed', dryRun: false, reason: 'list_fetch_failed',
+          failureKind: opt.failureKind ?? 'dns',
+          attemptSummary: opt.attemptSummary ?? { dns: 2, timeout: 1 },
+          elapsedBucket: opt.elapsedBucket ?? '5s_15s',
+          attempts: 3, op: 'getHospBasisList',
+        },
+      };
+    }
     for (let i = 1; i <= 3; i++) {
       sb.tables.facilities.push({ id: `H-ok${i}`, domain: 'HOSPITAL', name: `h${i}` });
       sb.tables.hospital_profiles.push({ facility_id: `H-ok${i}` });
@@ -783,6 +796,54 @@ test('ingest 실행 중 예외 → 자동 재시도 없음(runIngest 정확히 1
   assert.equal(spy.calls.length, 1);
   assert.equal(flashOf(post).ok, false);
   assert.equal(flashOf(post).code, 'ingest_error');
+});
+
+test('③ ingest: 내부 502 list_fetch_failed → flash 에 failureKind/attemptSummary/elapsedBucket (allowlist), 원문·키 없음', async () => {
+  const sb = makeMockSb();
+  const spy = makeRunIngestSpy(sb, {
+    mode: 'list_fail', failureKind: 'dns',
+    attemptSummary: { dns: 2, timeout: 1 }, elapsedBucket: '15s_30s',
+  });
+  const h = createHandler({ env: baseEnv(), sb, runIngest: spy });
+  const { post } = await getThenPost(h, {
+    sb, step: 'ingest', confirm: CONFIRM_PHRASE,
+    extraCookies: { '__Host-ic_dr': mintToken(SECRET, 'dryrun') },
+  });
+  assert.equal(spy.calls.length, 1);
+  const fl = flashOf(post);
+  assert.equal(fl.ok, false);
+  assert.equal(fl.code, 'ingest_failed');
+  assert.equal(fl.detail.reason, 'list_fetch_failed');
+  assert.equal(fl.detail.failureKind, 'dns');
+  assert.deepEqual(fl.detail.attemptSummary, { dns: 2, timeout: 1 });
+  assert.equal(fl.detail.elapsedBucket, '15s_30s');
+  assert.equal(fl.detail.hospitalCountAfter, 0);
+  // DB write 0
+  assert.equal(sb.tables.facilities.length, 0);
+  assert.equal(sb.tables.ingestion_runs.length, 0);
+  // 비밀·엔드포인트·원문 없음
+  const blob = JSON.stringify(fl);
+  assert.equal(/supabase|https?:|apis\.data\.go\.kr|serviceKey|Bearer|eyJ|ykiho/i.test(blob), false);
+  assert.equal(blob.includes(SECRET), false);
+});
+
+test('③ ingest: 내부가 allowlist 밖 failureKind 를 보내도 flash 에는 안 실림(null)', async () => {
+  const sb = makeMockSb();
+  const spy = makeRunIngestSpy(sb, {
+    mode: 'list_fail', failureKind: 'ENOTFOUND apis.data.go.kr serviceKey=xyz',
+    attemptSummary: { evil: 3, 'apis.data.go.kr': 1 }, elapsedBucket: '4123ms',
+  });
+  const h = createHandler({ env: baseEnv(), sb, runIngest: spy });
+  const { post } = await getThenPost(h, {
+    sb, step: 'ingest', confirm: CONFIRM_PHRASE,
+    extraCookies: { '__Host-ic_dr': mintToken(SECRET, 'dryrun') },
+  });
+  const fl = flashOf(post);
+  assert.equal(fl.detail.failureKind, null);      // allowlist 밖 → 버림
+  assert.equal(fl.detail.attemptSummary, null);   // allowlist 밖 키 → 전부 탈락
+  assert.equal(fl.detail.elapsedBucket, null);    // 구간값 아님 → 버림
+  const blob = JSON.stringify(fl);
+  assert.equal(/apis\.data\.go\.kr|serviceKey|ENOTFOUND/i.test(blob), false);
 });
 
 test('ingest 부분 적재(HOSPITAL=1) → 실패 표시 + 이후 GET 에서 모든 단계 차단', async () => {

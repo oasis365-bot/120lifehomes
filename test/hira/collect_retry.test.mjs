@@ -111,6 +111,33 @@ test('목록 throw → collect 재시도 없음 (단일 계층), 즉시 HiraErro
   assert.equal(/https?:|serviceKey|apis\.data\.go\.kr|JDQ4/.test(blob), false);
 });
 
+test('목록 throw → client 가 분류한 failureKind/attemptSummary/elapsedBucket 를 그대로 전달', async () => {
+  const { e } = await run(makeMockClient({
+    listTotal: 3, listThrowFirst: 1, listThrowReason: 'network',
+    listThrowFailureKind: 'dns', listThrowAttemptSummary: { dns: 2, timeout: 1 },
+    listThrowElapsedBucket: '15s_30s',
+  }));
+  assert.ok(e instanceof HiraError);
+  assert.equal(e.reason, 'list_fetch_failed');
+  assert.equal(e.failureKind, 'dns');
+  assert.deepEqual(e.attemptSummary, { dns: 2, timeout: 1 });
+  assert.equal(e.elapsedBucket, '15s_30s');
+  // 관측필드에 비밀·엔드포인트 없음
+  const blob = JSON.stringify({
+    reason: e.reason, failureKind: e.failureKind, attemptSummary: e.attemptSummary,
+    elapsedBucket: e.elapsedBucket, attempts: e.attempts,
+  });
+  assert.equal(/https?:|serviceKey|apis\.data\.go\.kr|ykiho/i.test(blob), false);
+});
+
+test('목록 throw(deadline) → failureKind=deadline', async () => {
+  const { e } = await run(makeMockClient({
+    listTotal: 3, listThrowFirst: 1, listThrowReason: 'deadline', listThrowFailureKind: 'timeout',
+  }));
+  assert.equal(e.reason, 'deadline_exceeded');
+  assert.equal(e.failureKind, 'deadline'); // collect 가 deadline 을 명시적으로 덮어씀
+});
+
 test('목록 비정상 resultCode(code 1) → 재시도 없음 → HiraError list_abnormal_result', async () => {
   const { e, sleeps } = await run(makeMockClient({ listTotal: 3, listAbnormalFirst: 1, listAbnormalCode: '1' }));
   assert.ok(e instanceof HiraError, `throw 안 함: ${e}`);

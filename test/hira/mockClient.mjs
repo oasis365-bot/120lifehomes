@@ -59,6 +59,9 @@ export function makeMockClient(opt = {}) {
         throw new HiraError('mock: HIRA getHospBasisList 재시도 소진', {
           op: 'getHospBasisList',
           reason: opt.listThrowReason ?? 'gateway',
+          failureKind: opt.listThrowFailureKind ?? 'result_code_12',
+          attemptSummary: opt.listThrowAttemptSummary ?? { [opt.listThrowFailureKind ?? 'result_code_12']: 3 },
+          elapsedBucket: opt.listThrowElapsedBucket ?? '5s_15s',
           attempts: 3,
           lastResultCode: opt.listThrowResultCode ?? null,
         });

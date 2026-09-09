@@ -171,7 +171,13 @@ export function createHandler(deps = {}) {
         });
       } catch (e) {
         const info = e instanceof HiraError
-          ? { reason: e.reason, op: e.op, attempts: e.attempts, lastResultCode: e.lastResultCode }
+          ? {
+            reason: e.reason, op: e.op, attempts: e.attempts, lastResultCode: e.lastResultCode,
+            // 관측용(allowlist) — 엔드포인트/호스트/원문 없음
+            failureKind: e.failureKind ?? null,
+            attemptSummary: e.attemptSummary ?? null,
+            elapsedBucket: e.elapsedBucket ?? null,
+          }
           : {};
         res.status(502).json({
           error: 'ingest_failed',
@@ -217,7 +223,13 @@ export function createHandler(deps = {}) {
     } catch (e) {
       const info =
         e instanceof HiraError
-          ? { reason: e.reason, op: e.op, attempts: e.attempts, lastStatus: e.lastStatus, lastResultCode: e.lastResultCode }
+          ? {
+            reason: e.reason, op: e.op, attempts: e.attempts,
+            lastStatus: e.lastStatus, lastResultCode: e.lastResultCode,
+            failureKind: e.failureKind ?? null,
+            attemptSummary: e.attemptSummary ?? null,
+            elapsedBucket: e.elapsedBucket ?? null,
+          }
           : {};
       res.status(502).json({
         error: 'collect_failed',

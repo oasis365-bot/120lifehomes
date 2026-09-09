@@ -305,6 +305,24 @@ async function defaultRunIngest({ env, dryRun }) {
 
 const intOrNull = (v) => (Number.isFinite(v) ? v : null);
 
+// 관측용 실패 종류 allowlist (lib/hira/client.js FAILURE_KINDS 와 동일). 그 밖의 값은 버린다.
+const FAILURE_KINDS = [
+  'timeout', 'network', 'dns', 'tls', 'http_429', 'http_5xx', 'result_code_12', 'deadline', 'unknown',
+];
+const ELAPSED_BUCKETS = ['lt_1s', '1s_5s', '5s_15s', '15s_30s', '30s_45s', 'gte_45s'];
+const failureKindOrNull = (v) => (typeof v === 'string' && FAILURE_KINDS.includes(v) ? v : null);
+const elapsedBucketOrNull = (v) => (typeof v === 'string' && ELAPSED_BUCKETS.includes(v) ? v : null);
+// attemptSummary: allowlist 키 + 양의 정수만 통과 (원문·비밀 유입 차단)
+function safeAttemptSummary(s) {
+  if (!s || typeof s !== 'object') return null;
+  const out = {};
+  for (const k of FAILURE_KINDS) {
+    const n = s[k];
+    if (Number.isInteger(n) && n > 0) out[k] = n;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 // stats 에서 정수 필드만 화이트리스트로 추출 (ykiho·raw·문자열 상세 제외)
 function safeStats(stats) {
   const s = stats && typeof stats === 'object' ? stats : {};
@@ -615,6 +633,9 @@ export function createHandler(deps = {}) {
             http: r.status,
             errorCode: errCode,
             reason: typeof b.reason === 'string' ? b.reason : null,
+            failureKind: failureKindOrNull(b.failureKind),
+            attemptSummary: safeAttemptSummary(b.attemptSummary),
+            elapsedBucket: elapsedBucketOrNull(b.elapsedBucket),
             attempts: intOrNull(b.attempts),
             persisted,
             collectedCount: intOrNull(b.collectedCount),
