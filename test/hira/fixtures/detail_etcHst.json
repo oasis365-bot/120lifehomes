@@ -1,0 +1,21 @@
+{
+  "response": {
+    "header": { "resultCode": "00", "resultMsg": "NORMAL SERVICE." },
+    "body": {
+      "items": {
+        "item": [
+          { "dtlGnlNopCdNm": "사회복지사", "gnlNopCnt": 1, "gnlNopDtlCd": 200,
+            "yadmNm": "(의)밀성학원의료재단 성모아하브요양병원",
+            "ykiho": "JDQ4MTYyMiM4MSMkMSMkNCMkOTkkNTgxMzUxIzIxIyQxIyQ1IyQ4OSQzNjE4MzIjNjEjJDEjJDAjJDgz" },
+          { "dtlGnlNopCdNm": "약사", "gnlNopCnt": 1, "gnlNopDtlCd": "071",
+            "yadmNm": "(의)밀성학원의료재단 성모아하브요양병원",
+            "ykiho": "JDQ4MTYyMiM4MSMkMSMkNCMkOTkkNTgxMzUxIzIxIyQxIyQ1IyQ4OSQzNjE4MzIjNjEjJDEjJDAjJDgz" },
+          { "dtlGnlNopCdNm": "물리치료사", "gnlNopCnt": 1, "gnlNopDtlCd": 100,
+            "yadmNm": "(의)밀성학원의료재단 성모아하브요양병원",
+            "ykiho": "JDQ4MTYyMiM4MSMkMSMkNCMkOTkkNTgxMzUxIzIxIyQxIyQ1IyQ4OSQzNjE4MzIjNjEjJDEjJDAjJDgz" }
+        ]
+      },
+      "numOfRows": 10, "pageNo": 1, "totalCount": 3
+    }
+  }
+}

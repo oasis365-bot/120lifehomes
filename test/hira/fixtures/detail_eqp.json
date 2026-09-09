@@ -1,0 +1,25 @@
+{
+  "response": {
+    "header": { "resultCode": "00", "resultMsg": "NORMAL SERVICE." },
+    "body": {
+      "items": {
+        "item": {
+          "addr": "경상남도 김해시 김해대로 2479-1, (삼정동)",
+          "aduChldSprmCnt": 0, "anvirTrrmSbdCnt": 0, "chldSprmCnt": 0,
+          "clCd": 28, "clCdNm": "요양병원", "dtrmSbdCnt": 0,
+          "emdongNm": "삼정동", "emymCnt": 0, "estbDd": 20100727,
+          "hghrSickbdCnt": 38, "isnrSbdCnt": 0, "nbySprmCnt": 0,
+          "orgTyCd": 11, "orgTyCdNm": "의료법인", "partumCnt": 0,
+          "permSbdCnt": 250, "postNo": 50934,
+          "psydeptClsGnlSbdCnt": 0, "psydeptClsHigSbdCnt": 0,
+          "psydeptOpenGnlSbdCnt": 0, "psydeptOpenHigSbdCnt": 0,
+          "ptrmCnt": 11, "sgguCd": 380100, "sgguCdNm": "김해시",
+          "sidoCd": 380000, "sidoCdNm": "경남", "soprmCnt": 0,
+          "stdSickbdCnt": 212, "telno": "055-320-2080",
+          "yadmNm": "(의)밀성학원의료재단 성모아하브요양병원"
+        }
+      },
+      "numOfRows": 10, "pageNo": 1, "totalCount": 1
+    }
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "response": {
+    "header": { "resultCode": "00", "resultMsg": "NORMAL SERVICE." },
+    "body": {
+      "items": {
+        "item": [
+          {
+            "addr": "경상남도 김해시 김해대로 2479-1, (삼정동)",
+            "clCd": 28, "clCdNm": "요양병원",
+            "cmdcGdrCnt": 3, "cmdcIntnCnt": 0, "cmdcResdntCnt": 0, "cmdcSdrCnt": 0,
+            "detyGdrCnt": 0, "detyIntnCnt": 0, "detyResdntCnt": 0, "detySdrCnt": 0,
+            "drTotCnt": 6, "emdongNm": "삼정동", "estbDd": 20100727,
+            "mdeptGdrCnt": 0, "mdeptIntnCnt": 0, "mdeptResdntCnt": 0, "mdeptSdrCnt": 3,
+            "pnursCnt": 0, "postNo": 50934, "sgguCd": 380100, "sgguCdNm": "김해시",
+            "sidoCd": 380000, "sidoCdNm": "경남", "telno": "055-320-2080",
+            "XPos": 128.8980324, "YPos": 35.2281381,
+            "yadmNm": "(의)밀성학원의료재단 성모아하브요양병원",
+            "ykiho": "JDQ4MTYyMiM4MSMkMSMkNCMkOTkkNTgxMzUxIzIxIyQxIyQ1IyQ4OSQzNjE4MzIjNjEjJDEjJDAjJDgz"
+          },
+          {
+            "addr": "경상남도 김해시 금관대로1084번길 15, (흥동)",
+            "clCd": 28, "clCdNm": "요양병원",
+            "cmdcGdrCnt": 2, "cmdcIntnCnt": 0, "cmdcResdntCnt": 0, "cmdcSdrCnt": 1,
+            "detyGdrCnt": 0, "detyIntnCnt": 0, "detyResdntCnt": 0, "detySdrCnt": 0,
+            "drTotCnt": 8, "emdongNm": "흥동", "estbDd": 20190207,
+            "mdeptGdrCnt": 1, "mdeptIntnCnt": 0, "mdeptResdntCnt": 0, "mdeptSdrCnt": 4,
+            "pnursCnt": 0, "postNo": 50963, "sgguCd": 380100, "sgguCdNm": "김해시",
+            "sidoCd": 380000, "sidoCdNm": "경남", "telno": "055-310-5500",
+            "XPos": 128.8507902, "YPos": 35.2240003,
+            "yadmNm": "(의)수의료재단 서청솔요양병원",
+            "ykiho": "JDQ4MTYyMiM4MSMkMSMkNCMkOTkkNTgxMzUxIzIxIyQxIyQ1IyQ4MiQzNjEyMjIjNTEjJDEjJDIjJDgz"
+          },
+          {
+            "addr": "부산광역시 부산진구 개금온정로 5, 지하1,지상3층 (개금동, 성원상떼뷰)",
+            "clCd": 28, "clCdNm": "요양병원",
+            "cmdcGdrCnt": 1, "cmdcIntnCnt": 0, "cmdcResdntCnt": 0, "cmdcSdrCnt": 1,
+            "detyGdrCnt": 1, "detyIntnCnt": 0, "detyResdntCnt": 0, "detySdrCnt": 0,
+            "drTotCnt": 6, "emdongNm": "개금동", "estbDd": 20100816,
+            "hospUrl": "http://www.개금중앙요양병원.kr/",
+            "mdeptGdrCnt": 0, "mdeptIntnCnt": 0, "mdeptResdntCnt": 0, "mdeptSdrCnt": 3,
+            "pnursCnt": 0, "postNo": 47268, "sgguCd": 210004, "sgguCdNm": "부산진구",
+            "sidoCd": 210000, "sidoCdNm": "부산", "telno": "051-582-7001",
+            "XPos": 129.0247934, "YPos": 35.1537626,
+            "yadmNm": "(의)영님의료재단 개금중앙요양병원",
+            "ykiho": "JDQ4MTAxMiM1MSMkMSMkMCMkOTkkNTgxMzUxIzIxIyQxIyQxIyQ2MiQyNjEyMjIjNDEjJDEjJDgjJDgz"
+          },
+          {
+            "addr": "부산광역시 기장군 기장읍 기장해안로 552, (기장읍)",
+            "clCd": 28, "clCdNm": "요양병원",
+            "cmdcGdrCnt": 2, "cmdcIntnCnt": 0, "cmdcResdntCnt": 0, "cmdcSdrCnt": 0,
+            "detyGdrCnt": 0, "detyIntnCnt": 0, "detyResdntCnt": 0, "detySdrCnt": 0,
+            "drTotCnt": 4, "emdongNm": "기장읍", "estbDd": 20050317,
+            "mdeptGdrCnt": 0, "mdeptIntnCnt": 0, "mdeptResdntCnt": 0, "mdeptSdrCnt": 2,
+            "pnursCnt": 0, "postNo": 46079, "sgguCd": 210100, "sgguCdNm": "부산기장군",
+            "sidoCd": 210000, "sidoCdNm": "부산", "telno": "051-722-4848",
+            "XPos": "129.2269050", "YPos": 35.2228262,
+            "yadmNm": "(의)피터의료재단새소망요양병원",
+            "ykiho": "JDQ4MTAxMiM1MSMkMSMkMCMkOTkkNTgxMzUxIzExIyQxIyQzIyQ4MiQyNjE4MzIjNDEjJDEjJDgjJDgz"
+          },
+          {
+            "addr": "경기도 용인시 수지구 포은대로59번길 17, 광교복합의료센터 (상현동)",
+            "clCd": 28, "clCdNm": "요양병원",
+            "cmdcGdrCnt": 1, "cmdcIntnCnt": 0, "cmdcResdntCnt": 0, "cmdcSdrCnt": 0,
+            "detyGdrCnt": 0, "detyIntnCnt": 0, "detyResdntCnt": 0, "detySdrCnt": 0,
+            "drTotCnt": 7, "emdongNm": "상현동", "estbDd": 20180425,
+            "mdeptGdrCnt": 0, "mdeptIntnCnt": 0, "mdeptResdntCnt": 0, "mdeptSdrCnt": 6,
+            "pnursCnt": 0, "postNo": 16864, "sgguCd": 312002, "sgguCdNm": "용인수지구",
+            "sidoCd": 310000, "sidoCdNm": "경기", "telno": "031-659-7800",
+            "XPos": 127.0658441, "YPos": 37.3010717,
+            "yadmNm": "(의)현당의료재단 늘봄요양병원",
+            "ykiho": "JDQ4MTYyMiM1MSMkMSMkMCMkOTkkNTgxMzUxIzQxIyQxIyQ3IyQxMyQzNjE0ODEjODEjJDEjJDIjJDgz"
+          }
+        ]
+      },
+      "numOfRows": 5, "pageNo": 1, "totalCount": 1280
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "response": {
+    "header": { "resultCode": "00", "resultMsg": "NORMAL SERVICE." },
+    "body": {
+      "items": {
+        "item": {
+          "emyDayYn": "N", "emyNgtYn": "N",
+          "lunchWeek": "12시00분~13시00분",
+          "noTrmtHoli": "전부 휴진", "noTrmtSun": "전부 휴진",
+          "parkQty": 25, "parkXpnsYn": "N",
+          "plcDir": "김해시청방향", "plcDist": "200m", "plcNm": "김해동부소방서",
+          "rcvWeek": "09시00분~16:30분",
+          "trmtFriEnd": 1700, "trmtFriStart": "0900",
+          "trmtMonEnd": 1700, "trmtMonStart": "0900",
+          "trmtThuEnd": 1700, "trmtThuStart": "0900",
+          "trmtTueEnd": 1700, "trmtTueStart": "0900",
+          "trmtWedEnd": 1700, "trmtWedStart": "0900"
+        }
+      },
+      "numOfRows": 5, "pageNo": 1, "totalCount": 1
+    }
+  }
+}

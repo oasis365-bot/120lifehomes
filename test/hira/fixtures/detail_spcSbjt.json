@@ -1,0 +1,14 @@
+{
+  "response": {
+    "header": { "resultCode": "00", "resultMsg": "NORMAL SERVICE." },
+    "body": {
+      "items": {
+        "item": [
+          { "dgsbjtCd": "01", "dgsbjtCdNm": "내과", "dtlSdrCnt": 1 },
+          { "dgsbjtCd": "04", "dgsbjtCdNm": "외과", "dtlSdrCnt": 2 }
+        ]
+      },
+      "numOfRows": 20, "pageNo": 1, "totalCount": 2
+    }
+  }
+}
