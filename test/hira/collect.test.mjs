@@ -86,3 +86,37 @@ test('페이지네이션 — pageSize 넘으면 다음 페이지 요청', async 
   assert.ok(r.stats.listPages >= 3);
   assert.ok(c.calls.includes('list:p3'));
 });
+
+// ── listOnly (readiness dry-run): 목록만, 상세·평가 미호출 ──
+test('listOnly — 목록만 호출해 기본 정규화, 상세 6종·평가 API 호출 0', async () => {
+  const c = makeMockClient({ listTotal: 3 });
+  const r = await collectHospitals(c, { maxInstitutions: 3, pageSize: 100, listOnly: true });
+
+  assert.equal(r.stats.deduped, 3);
+  assert.equal(r.stats.normalized, 3);
+  assert.equal(r.meta.mode, 'list_only');
+  assert.equal(r._normalizedAll.length, 3);
+  // 상세/평가 관련 통계·데이터 없음
+  assert.equal(r.stats.detailComplete, 0);
+  assert.equal(r.stats.detailPartial, 0);
+  for (const it of r._normalizedAll) {
+    assert.equal(it.evaluation, null);
+    assert.deepEqual(Object.keys(it.raw), ['basis']); // raw 는 basis 만
+    assert.ok(it.hospital.id.startsWith('H-'));
+    assert.ok(it.hospital.external_id);
+    assert.ok(it.hospital.name);
+  }
+  // client 호출은 목록뿐
+  const detailCalls = c.calls.filter((x) =>
+    ['facility', 'detail', 'departments', 'equipment', 'specialists', 'otherStaff', 'evaluation'].includes(x));
+  assert.equal(detailCalls.length, 0);
+  assert.equal(c.calls.filter((x) => x.startsWith('list:')).length, 1);
+});
+
+test('listOnly — ykiho 중복은 dedupe, 필수필드 없으면 정규화 제외', async () => {
+  const c = makeMockClient({ listTotal: 6, dupEvery: 2 }); // i=2,4 중복 → 고유 4
+  const r = await collectHospitals(c, { maxInstitutions: 10, pageSize: 100, listOnly: true });
+  assert.equal(r.stats.listed, 6);
+  assert.equal(r.stats.deduped, 4);
+  assert.equal(r.stats.normalized, 4);
+});

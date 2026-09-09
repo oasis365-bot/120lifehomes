@@ -276,9 +276,10 @@ export function decideAvailability(state) {
 
 // ── 내부 실행: 기존 ingest 핸들러를 그대로 호출 (CRON_SECRET = 내부 인증에만) ──
 // limit 은 여기서 3 으로 고정 — 외부 query 는 절대 반영되지 않는다.
+// ② dry-run = readiness (목록만). ③ = full collect 1회 → 그대로 persist.
 export function internalIngestQuery(dryRun) {
   return dryRun
-    ? { limit: String(REQUIRED_LIMIT) }
+    ? { limit: String(REQUIRED_LIMIT), readiness: '1' }
     : { dryRun: 'false', limit: String(REQUIRED_LIMIT) };
 }
 
@@ -407,18 +408,18 @@ ${overfillNote}${partialNote}
 
 ${stepForm('precheck', '① 사전점검', '위 상태를 다시 읽어 결과를 기록합니다. DB write·HIRA 호출 없음.', true)}
 
-${stepForm('dryrun', '② Dry-run 3건',
-  'HIRA 에서 3곳을 수집·정규화만 합니다 (DB write 0). ① 조건이 모두 충족돼야 활성화됩니다.',
+${stepForm('dryrun', '② Readiness Dry-run 3건',
+  'HIRA 목록(getHospBasisList)만 호출해 요양병원 3곳을 확보하고 기본 정규화·ykiho 중복·필수필드·Preview DB 안전 게이트를 확인합니다. 상세 6종·평가 API 는 호출하지 않습니다. DB write 0. ① 조건이 모두 충족돼야 활성화됩니다.',
   avail.dryrun)}
 
 ${stepForm('ingest', '③ 최초 적재 3건',
-  '정확히 3곳을 Preview DB 에 1회 적재합니다. 최근 5분 내 dry-run 성공 + HOSPITAL=0 + 확인문구가 필요합니다.',
+  'HIRA 목록+상세+평가를 1회 전체 수집한 뒤, 재수집 없이 그 결과를 Preview DB 에 그대로 적재합니다. 기본시설이 정확히 3건이 아니면 적재를 시작하지 않습니다. 최근 5분 내 ② Readiness 성공 + HOSPITAL=0 + 확인문구가 필요합니다.',
   avail.ingest && drReady,
   {
     confirm: avail.ingest && drReady,
     gated: avail.ingest && drReady,
     note: !avail.ingest ? '차단: ① 조건 미충족 또는 HOSPITAL≠0'
-      : !drReady ? '차단: 최근 5분 내 ② dry-run 성공 기록이 없습니다. ② 를 먼저 실행하세요.' : '',
+      : !drReady ? '차단: 최근 5분 내 ② Readiness Dry-run 성공 기록이 없습니다. ② 를 먼저 실행하세요.' : '',
   })}
 
 ${stepForm('idempotency', '④ 멱등성 재실행',
@@ -576,17 +577,19 @@ export function createHandler(deps = {}) {
       const normalizedN = Number.isFinite(st.normalized) ? st.normalized : null;
       const dedupedN = Number.isFinite(st.deduped) ? st.deduped : null;
       const detail = {
-        http: r.status, dbWrites: r.body.dbWrites === 0 ? 0 : r.body.dbWrites,
+        http: r.status,
+        mode: typeof r.body.mode === 'string' ? r.body.mode : null, // 'readiness'
+        dbWrites: r.body.dbWrites === 0 ? 0 : r.body.dbWrites,
         deduped: dedupedN,
         normalized: normalizedN,
-        apiCalls: Number.isFinite(st.apiCalls) ? st.apiCalls : null,
+        listApiCalls: Number.isFinite(st.apiCalls) ? st.apiCalls : null, // readiness 면 목록 호출 수
         listRetries: Number.isFinite(st.listRetries) ? st.listRetries : null,
         warnings: Array.isArray(r.body.warnings) ? r.body.warnings.length : 0,
         failures: Array.isArray(r.body.failures) ? r.body.failures.length : 0,
       };
-      // dry-run 도 "정확히 REQUIRED_LIMIT 건 정규화" 여야 진행 토큰(ic_dr)을 준다.
+      // readiness 도 "정확히 REQUIRED_LIMIT 건 확보" 여야 진행 토큰(ic_dr)을 준다.
       if (normalizedN !== REQUIRED_LIMIT) {
-        blocked('dryrun_incomplete', detail);
+        blocked('readiness_incomplete', detail);
         return;
       }
       done(

@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHandler } from '../../api/hospital/ingest.js';
+import { internalIngestQuery } from '../../api/hospital/ingest-control.js';
 import { collectHospitals } from '../../lib/hira/collect.js';
 import { createHiraClient } from '../../lib/hira/client.js';
 import { persistCollected, EXPECTED_PREVIEW_DB_HOST } from '../../lib/hira/persist.js';
@@ -277,6 +278,66 @@ test('통합 dry-run: 예산 초과 → 502 (dry-run 도 동일 안전장치), D
   assert.notEqual(res.body.ok, true);
   assert.ok(clock < 45_000);
   assert.equal(sb.countWrites(), 0);
+});
+
+// ── 최소안 A: ② readiness(목록만) / ③ full collect 1회 → 그대로 persist ──
+test('readiness dry-run: HIRA 호출이 목록 범위로 제한 (상세·평가 0), DB write 0, normalized=3', async () => {
+  const c = makeMockClient({ listTotal: 3 });
+  const sb = makeMockSb();
+  const res = mkRes();
+  await createHandler({
+    env: env(), createClient: () => c, collect: collectHospitals, persist: persistCollected,
+    sbImpl: sb, assertDb: async () => ({ ok: true }),
+  })(mkReq({ headers: auth, query: internalIngestQuery(true) }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.dryRun, true);
+  assert.equal(res.body.mode, 'readiness');
+  assert.equal(res.body.dbWrites, 0);
+  assert.equal(res.body.stats.normalized, 3);
+  assert.equal(c.calls.filter((x) => x.startsWith('list:')).length, 1);
+  assert.equal(c.calls.filter((x) => !x.startsWith('list:')).length, 0); // 상세/평가 0
+  assert.equal(sb.countWrites(), 0);
+});
+
+test('readiness dry-run: 목록이 3건 미만이면 502 (진행 불가), DB write 0', async () => {
+  const c = makeMockClient({ listTotal: 2 });
+  const sb = makeMockSb();
+  const res = mkRes();
+  await createHandler({
+    env: env(), createClient: () => c, collect: collectHospitals, persist: persistCollected,
+    sbImpl: sb, assertDb: async () => ({ ok: true }),
+  })(mkReq({ headers: auth, query: internalIngestQuery(true) }), res);
+  assert.equal(res.statusCode, 502);
+  assert.equal(res.body.reason, 'incomplete_collect');
+  assert.equal(res.body.mode, 'readiness');
+  assert.equal(res.body.normalizedCount, 2);
+  assert.equal(sb.countWrites(), 0);
+});
+
+test('readiness 성공 후 ③ full collect(재수집 없이 그 결과 persist) → new 3 / 재실행 unchanged 3', async () => {
+  const sb = makeMockSb();
+  const run = (dryRun) => {
+    const c = makeMockClient({ listTotal: 3 });
+    const res = mkRes();
+    return createHandler({
+      env: env(), createClient: () => c, collect: collectHospitals, persist: persistCollected,
+      sbImpl: sb, assertDb: async () => ({ ok: true }),
+    })(mkReq({ headers: auth, query: internalIngestQuery(dryRun) }), res).then(() => ({ res, calls: c.calls }));
+  };
+  const { res: r2 } = await run(true);
+  assert.equal(r2.body.mode, 'readiness');
+  assert.equal(r2.statusCode, 200);
+
+  const { res: r3, calls: c3 } = await run(false);
+  assert.equal(r3.statusCode, 200);
+  assert.equal(r3.body.persisted.new, 3);
+  assert.equal(c3.length, 22); // 목록1 + 상세6×3 + 평가3 (한 번의 full collect, 재수집 없음)
+  assert.equal(sb.tables.facilities.filter((f) => f.domain === 'HOSPITAL').length, 3);
+
+  const { res: r3b } = await run(false);
+  assert.equal(r3b.body.persisted.unchanged, 3);
+  assert.equal(r3b.body.persisted.new, 0);
 });
 
 // ── _normalizedAll 전달 경로 ───────────────────────────────────────

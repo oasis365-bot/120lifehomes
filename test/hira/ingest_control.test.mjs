@@ -155,8 +155,8 @@ test('mintToken/verifyToken: 정상·변조·만료·kind불일치·다른시크
   assert.equal(verifyToken(SECRET, 'csrf', 'a.b.c', t0), false);
 });
 
-test('internalIngestQuery: limit 은 항상 3, dryRun 만 토글', () => {
-  assert.deepEqual(internalIngestQuery(true), { limit: '3' });
+test('internalIngestQuery: limit 3 고정, ② = readiness / ③ = full', () => {
+  assert.deepEqual(internalIngestQuery(true), { limit: '3', readiness: '1' });
   assert.deepEqual(internalIngestQuery(false), { dryRun: 'false', limit: '3' });
   assert.equal(REQUIRED_LIMIT, 3);
 });
@@ -831,7 +831,7 @@ function realRunIngest(sb, clientOpt = { listTotal: 3 }, over = {}) {
     await handler(
       {
         headers: { authorization: `Bearer ${SECRET}` },
-        query: dryRun ? { limit: '3' } : { dryRun: 'false', limit: '3' },
+        query: internalIngestQuery(dryRun), // ② = readiness(목록만), ③ = full collect
       },
       { status(c) { cap.status = c; return this; }, json(b) { cap.body = b; return this; }, setHeader() {} }
     );
@@ -975,6 +975,72 @@ test('통합 ③: 2차 수집 목록 throw (client 소진) → collect 재재시
   assert.equal(fl.ok, false);
   assert.equal(fl.detail.reason, 'list_fetch_failed');
   assert.equal(sb.tables.facilities.length, 0);
+});
+
+test('②③ 흐름: ② readiness(목록만) 성공 → ③ full collect 정확히 1회 → new 3', async () => {
+  const sb = makeMockSb();
+  let dryRunN = 0;
+  let wetRunN = 0;
+  let wetCollectCalls = 0;
+  let dryDetailCalls = 0;
+  const runIngest = async ({ dryRun }) => {
+    const c = makeMockClient({ listTotal: 3 });
+    const handler = ingestCreateHandler({
+      env: baseEnv(), createClient: () => c, collect: fastCollect, persist: persistCollected,
+      sbImpl: sb, assertDb: async () => ({ ok: true }),
+    });
+    const cap = { status: 200, body: null };
+    await handler(
+      { headers: { authorization: `Bearer ${SECRET}` }, query: internalIngestQuery(dryRun) },
+      { status(x) { cap.status = x; return this; }, json(x) { cap.body = x; return this; }, setHeader() {} }
+    );
+    if (dryRun) {
+      dryRunN += 1;
+      dryDetailCalls = c.calls.filter((x) => !x.startsWith('list:')).length;
+    } else {
+      wetRunN += 1;
+      wetCollectCalls = c.calls.length;
+    }
+    return cap;
+  };
+  const h = createHandler({ env: baseEnv(), sb, runIngest });
+
+  // ② Readiness
+  const p2 = await getThenPost(h, { sb, step: 'dryrun' });
+  const fl2 = flashOf(p2.post);
+  assert.equal(fl2.ok, true);
+  assert.equal(fl2.detail.mode, 'readiness');
+  assert.equal(fl2.detail.dbWrites, 0);
+  assert.equal(fl2.detail.normalized, 3);
+  assert.equal(dryDetailCalls, 0);           // ② 는 상세/평가 API 호출 0
+  assert.ok(cookiesOf(p2.post)['__Host-ic_dr']);
+
+  // ③ full collect 1회 → 그대로 persist
+  const p3 = await getThenPost(h, {
+    sb, step: 'ingest', confirm: CONFIRM_PHRASE,
+    extraCookies: { '__Host-ic_dr': cookiesOf(p2.post)['__Host-ic_dr'] },
+  });
+  const fl3 = flashOf(p3.post);
+  assert.equal(fl3.ok, true);
+  assert.equal(fl3.detail.persisted.new, 3);
+  assert.equal(dryRunN, 1);
+  assert.equal(wetRunN, 1);                   // ③ full collect 정확히 1회
+  assert.equal(wetCollectCalls, 22);          // 목록1 + 상세6×3 + 평가3 — 재수집 없음(44 아님)
+  assert.equal(sb.tables.facilities.filter((f) => f.domain === 'HOSPITAL').length, 3);
+
+  // ④ 멱등성
+  const p4 = await getThenPost(h, { sb, step: 'idempotency', confirm: CONFIRM_PHRASE });
+  const fl4 = flashOf(p4.post);
+  assert.equal(fl4.ok, true);
+  assert.equal(fl4.detail.persisted.unchanged, 3);
+});
+
+test('② readiness 목록 실패 → flash 실패, ic_dr 미발급 (③ 불가)', async () => {
+  const sb = makeMockSb();
+  const h = createHandler({ env: baseEnv(), sb, runIngest: realRunIngest(sb, { listTotal: 3, listThrowFirst: 3 }) });
+  const { post } = await getThenPost(h, { sb, step: 'dryrun' });
+  assert.equal(flashOf(post).ok, false);
+  assert.equal(cookiesOf(post)['__Host-ic_dr'], undefined);
 });
 
 test('통합: control flash detail 에 ykiho·raw·URL·키 없음 (익명 숫자만)', async () => {

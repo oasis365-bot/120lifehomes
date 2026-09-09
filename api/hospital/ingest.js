@@ -190,24 +190,30 @@ export function createHandler(deps = {}) {
       return;
     }
 
+    // readiness: HIRA 목록만 호출해 3건 확보·기본검증 (상세 6종·평가 미호출). DB write 0.
+    const readiness = String(q.readiness) === '1' || String(q.mode) === 'readiness';
+
     try {
       // dry-run 도 실 적재와 동일한 시간 안전장치.
       const deadlineMs = now() + COLLECT_BUDGET_MS;
       const client = createClient({ key, deadlineMs, now });
-      const result = await collect(client, { maxInstitutions: limit, pageSize: 100, deadlineMs, now });
+      const result = await collect(client, {
+        maxInstitutions: limit, pageSize: 100, deadlineMs, now, listOnly: readiness,
+      });
       const { _normalizedAll, ...safe } = result;
       // dry-run 도 정확히 limit 건을 완성해야 "성공". (부분·0건은 502.)
       if ((result?.stats?.normalized ?? 0) !== limit) {
         res.status(502).json({
           error: 'collect_failed',
           reason: 'incomplete_collect',
+          mode: readiness ? 'readiness' : 'full',
           collectedCount: Number.isFinite(result?.stats?.deduped) ? result.stats.deduped : null,
           normalizedCount: Number.isFinite(result?.stats?.normalized) ? result.stats.normalized : null,
           listRetries: Number.isFinite(result?.stats?.listRetries) ? result.stats.listRetries : null,
         });
         return;
       }
-      res.status(200).json({ ok: true, dryRun: true, dbWrites: 0, ...safe });
+      res.status(200).json({ ok: true, dryRun: true, mode: readiness ? 'readiness' : 'full', dbWrites: 0, ...safe });
     } catch (e) {
       const info =
         e instanceof HiraError
