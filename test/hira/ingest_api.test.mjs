@@ -161,13 +161,17 @@ test('19. persist 활성 + limit 상한 3', async () => {
   assert.equal(seen.maxInstitutions, 3);
 });
 
-test('20. persist 활성 + 실제 assertPreviewDb + 틀린 SUPABASE_URL → 409 wrong_preview_db, persist·collect 미실행', async () => {
+test('20. persist 활성 + 실제 assertPreviewDb + 허용 host 와 다른 SUPABASE_URL → 409 wrong_preview_db, persist·collect 미실행', async () => {
   let touched = false;
   const sb = makeMockSb();
   const res = mkRes();
   await createHandler({
-    // assertDb 를 주입하지 않음 → 실제 assertPreviewDb 사용
-    env: { CRON_SECRET: SECRET, DATA_GO_KR_KEY: 'k', VERCEL_ENV: 'preview', HOSPITAL_INGEST_PERSIST: '1', SUPABASE_URL: 'https://wdjqtynpqpzgiuzvphdr.supabase.co' },
+    // assertDb 를 주입하지 않음 → 실제 assertPreviewDb 사용. 합성 hostname (실제 ref 아님).
+    env: {
+      CRON_SECRET: SECRET, DATA_GO_KR_KEY: 'k', VERCEL_ENV: 'preview', HOSPITAL_INGEST_PERSIST: '1',
+      HOSPITAL_INGEST_DB_HOST: 'preview-db-ref-test.supabase.co',
+      SUPABASE_URL: 'https://another-db-ref-test.supabase.co',
+    },
     sbImpl: sb,
     createClient: () => { touched = true; return makeMockClient({ listTotal: 5 }); },
     collect: async () => { touched = true; return { _normalizedAll: [] }; },
@@ -180,7 +184,24 @@ test('20. persist 활성 + 실제 assertPreviewDb + 틀린 SUPABASE_URL → 409 
   assert.equal(sb.calls.length, 0); // 목적지 틀리면 DB 접속 0
   // 응답에 URL·ref·키 없음
   const blob = JSON.stringify(res.body);
-  assert.ok(!/supabase\.co|https?:|wdjq|sojxq|apikey|SUPABASE/.test(blob));
+  assert.ok(!/supabase\.co|https?:|ref-test|apikey|SUPABASE/.test(blob));
+});
+
+test('20b. persist 활성 + HOSPITAL_INGEST_DB_HOST 미설정 → 409 wrong_preview_db (fail-closed)', async () => {
+  const sb = makeMockSb();
+  const res = mkRes();
+  await createHandler({
+    env: {
+      CRON_SECRET: SECRET, DATA_GO_KR_KEY: 'k', VERCEL_ENV: 'preview', HOSPITAL_INGEST_PERSIST: '1',
+      SUPABASE_URL: 'https://preview-db-ref-test.supabase.co', // URL 은 있으나 허용 host 미지정
+    },
+    sbImpl: sb,
+    collect: async () => ({ _normalizedAll: [] }),
+    persist: async () => ({}),
+  })(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.reason, 'wrong_preview_db');
+  assert.equal(sb.calls.length, 0);
 });
 
 // ── 비밀정보 비노출 ────────────────────────────────────────────────

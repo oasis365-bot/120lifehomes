@@ -3,19 +3,23 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHandler } from '../../api/hospital/ingest.js';
-import { internalIngestQuery } from '../../api/hospital/ingest-control.js';
 import { collectHospitals } from '../../lib/hira/collect.js';
 import { createHiraClient } from '../../lib/hira/client.js';
-import { persistCollected, EXPECTED_PREVIEW_DB_HOST } from '../../lib/hira/persist.js';
+import { persistCollected } from '../../lib/hira/persist.js';
 import { makeMockClient } from './mockClient.mjs';
 import { makeMockSb } from './mockSb.mjs';
 
 const SECRET = 'integ-secret';
 const auth = { authorization: `Bearer ${SECRET}` };
-const PREVIEW_URL = `https://${EXPECTED_PREVIEW_DB_HOST}`;
+// 테스트용 합성 hostname — 실제 프로젝트 ref 는 코드·테스트에 넣지 않는다.
+const ALLOWED_DB_HOST = 'preview-db-ref-test.supabase.co';
+const PREVIEW_URL = `https://${ALLOWED_DB_HOST}`;
+// ingest.js 쿼리 형태: readiness(목록만 dry-run) / 실 적재.
+const internalIngestQuery = (dryRun) =>
+  (dryRun ? { limit: '3', readiness: '1' } : { dryRun: 'false', limit: '3' });
 const env = (e = {}) => ({
   CRON_SECRET: SECRET, DATA_GO_KR_KEY: 'k', VERCEL_ENV: 'preview',
-  HOSPITAL_INGEST_PERSIST: '1', SUPABASE_URL: PREVIEW_URL, ...e,
+  HOSPITAL_INGEST_PERSIST: '1', SUPABASE_URL: PREVIEW_URL, HOSPITAL_INGEST_DB_HOST: ALLOWED_DB_HOST, ...e,
 });
 const mkRes = () => ({
   statusCode: null, body: null, headers: {},

@@ -1,18 +1,23 @@
 // =====================================================================
-// GET /api/hospital/ingest — 요양병원 수집 (dry-run) + (1B-3B) Preview 시험 적재
+// GET /api/hospital/ingest — 요양병원 수집 (dry-run) + Preview 소량 실 적재
 // =====================================================================
 //  · production(VERCEL_ENV=production) → 404
 //  · CRON_SECRET Bearer 인증 필수 (timingSafeEqual). 없거나 틀리면 401.
 //  · 기본 dryRun=true : HIRA 수집 → 정규화 → 통계·경고·샘플3. DB write 0.
-//  · dryRun=false (실 적재):
-//      - HOSPITAL_INGEST_PERSIST 환경변수 = '1' 이 아니면 → 501 (1B-3A 에서는 비활성)
-//      - assertPreviewDb() 로 "Preview 전용 빈 DB" 확인. 운영 Supabase / hospital_module ON 이면 중단
+//    ?readiness=1 : 목록만 수집(listOnly). 상세·평가 미호출. DB write 0.
+//  · dryRun=false (실 적재) — 아래 전부 통과해야 write:
+//      - HOSPITAL_INGEST_PERSIST = '1'                         (아니면 501)
+//      - HOSPITAL_INGEST_DB_HOST 에 지정된 hostname 과 SUPABASE_URL 정확 일치
+//        (미설정/불일치면 assertPreviewDb → 409 wrong_preview_db, DB 접속 0 — fail-closed)
+//      - assertPreviewDb(): 운영 Supabase / LTC 행 존재 / hospital_module ON / 스키마 미완 → 409
 //      - limit 최대 3
-//  · DATA_GO_KR_KEY / CRON_SECRET / DB URL / ykiho 원문 을 응답·로그에 출력하지 않음.
+//  · DATA_GO_KR_KEY / CRON_SECRET / DB URL·ref / ykiho 원문 을 응답·로그에 출력하지 않음.
+//    HIRA 실패 원인은 allowlist(failureKind/attemptSummary/elapsedBucket)로만.
 //
 //  쿼리:
 //    ?limit=<1..3>    수집 기관 수 (기본 3, 상한 3)
-//    ?dryRun=false    실 적재 (HOSPITAL_INGEST_PERSIST=1 + Preview DB 확인 필요)
+//    ?dryRun=false    실 적재 (위 조건 필요)
+//    ?readiness=1     목록만 dry-run
 //    ?secret=         (Bearer 대신 호환용)
 // =====================================================================
 import { timingSafeEqual } from 'node:crypto';
