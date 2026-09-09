@@ -99,11 +99,53 @@ test('재시도 사이 대기: client 250ms 위에 지수 백오프+jitter (요�
   assert.deepEqual(sleeps, [525, 925]);
 });
 
-test('목록 throw (게이트웨이) → 재시도 안 함 (client 자체 재시도 담당), 경고 후 진행', async () => {
-  const { r, sleeps } = await run(makeMockClient({ listTotal: 3, listThrowFirst: 1 }));
-  assert.equal(r.stats.deduped, 0);
-  assert.equal(sleeps.length, 0);
-  assert.ok(r.warnings.some((w) => /목록/.test(w)));
+test('목록 throw(일시적) 1회 → collect 레벨 재시도 → 두 번째 정상 3건', async () => {
+  const { r, sleeps } = await run(makeMockClient({ listTotal: 3, listThrowFirst: 1, listThrowReason: 'gateway' }));
+  assert.equal(r.stats.deduped, 3);
+  assert.equal(r.stats.listRetries, 1);
+  assert.equal(sleeps.length, 1);
+});
+
+test('목록 throw(일시적) 2회 → 세 번째 정상 3건', async () => {
+  const { r } = await run(makeMockClient({ listTotal: 3, listThrowFirst: 2, listThrowReason: 'timeout' }));
+  assert.equal(r.stats.deduped, 3);
+  assert.equal(r.stats.listRetries, 2);
+});
+
+test('목록 throw(일시적) 3회 모두 → HiraError list_fetch_failed (성공 0건 반환 안 함)', async () => {
+  const { e, sleeps } = await run(makeMockClient({ listTotal: 3, listThrowFirst: 3, listThrowReason: 'gateway' }));
+  assert.ok(e instanceof HiraError, `throw 안 함: ${e}`);
+  assert.equal(e.reason, 'list_fetch_failed');
+  assert.equal(e.attempts, 3);
+  assert.equal(e.op, 'getHospBasisList');
+  assert.equal(sleeps.length, 2);
+  const blob = JSON.stringify({ m: e.message, reason: e.reason, op: e.op });
+  assert.equal(/https?:|serviceKey|apis\.data\.go\.kr|JDQ4/.test(blob), false);
+});
+
+test('목록 비정상 resultCode(비일시적, code 1) → 재시도 안 함 → HiraError list_abnormal_result', async () => {
+  const { e, sleeps } = await run(makeMockClient({ listTotal: 3, listAbnormalFirst: 3, listAbnormalCode: '1' }));
+  assert.ok(e instanceof HiraError, `throw 안 함: ${e}`);
+  assert.equal(e.reason, 'list_abnormal_result');
+  assert.equal(e.lastResultCode, '1');
+  assert.equal(sleeps.length, 0); // 비일시적 → 재시도 없음
+});
+
+test('목록 throw(config = 키 미설정) → 재시도 안 함, list_fetch_failed', async () => {
+  const { e, sleeps } = await run(makeMockClient({ listTotal: 3, listThrowFirst: 3, listThrowReason: 'config' }));
+  assert.ok(e instanceof HiraError);
+  assert.equal(e.reason, 'list_fetch_failed');
+  assert.equal(sleeps.length, 0); // config 는 재시도 안 함
+});
+
+test('이미 일부 페이지 수집 후 후속 페이지가 계속 throw → 부분 결과 반환(throw 안 함), 경고', async () => {
+  // p1 정상 5건(pageSize 5, totalCount 10) → 그 다음 호출부터 throw
+  const { r } = await run(
+    makeMockClient({ listTotal: 10, listThrowFrom: 2, listThrowReason: 'gateway' }),
+    { maxInstitutions: 20, pageSize: 5 }
+  );
+  assert.equal(r.stats.deduped, 5); // p1 만
+  assert.ok(r.warnings.some((w) => /목록 p2/.test(w)));
 });
 
 test('빈 응답 재시도가 endpoint fallback 을 하지 않는다 (listHospitals 만 호출)', async () => {

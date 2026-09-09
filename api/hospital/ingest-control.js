@@ -632,6 +632,7 @@ export function createHandler(deps = {}) {
             collectedCount: intOrNull(b.collectedCount),
             normalizedCount: intOrNull(b.normalizedCount),
             persistInputCount: intOrNull(b.persistInputCount),
+            listRetries: intOrNull(b.listRetries),
             expected: intOrNull(b.expected),
             writeSum: intOrNull(b.writeSum),
             runId: Number.isFinite(b.runId) ? b.runId : null,

@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseHiraResponse } from '../../lib/hira/parse.js';
-import { HIRA_ENDPOINTS } from '../../lib/hira/client.js';
+import { HIRA_ENDPOINTS, HiraError } from '../../lib/hira/client.js';
 
 const fx = (name) =>
   parseHiraResponse(
@@ -17,7 +17,10 @@ const fx = (name) =>
  * @param {Set<string>} [opt.emptySteps]    이 step 은 빈 결과 반환
  * @param {number} [opt.listEmptyFirst=0]   처음 N 번의 listHospitals 호출은 "정상 resultCode + 0건" 반환
  * @param {number|null} [opt.listEmptyTotal]  위 빈 응답이 보고할 totalCount (기본 listTotal, null 이면 totalCount 미포함)
- * @param {number} [opt.listThrowFirst=0]   처음 N 번의 listHospitals 호출은 throw
+ * @param {number} [opt.listThrowFirst=0]   처음 N 번의 listHospitals 호출은 HiraError throw (client 재시도 소진 흉내)
+ * @param {string} [opt.listThrowReason='gateway']  위 throw 의 reason ('timeout'|'network'|'http'|'gateway'|'aborted_all'|'config')
+ * @param {number} [opt.listAbnormalFirst=0] 처음 N 번의 listHospitals 호출은 비정상 resultCode 반환 (client 가 "비일시적" 으로 그대로 반환한 것)
+ * @param {string} [opt.listAbnormalCode='1']  위 비정상 응답의 resultCode
  * @param {Object<number,number>} [opt.emptyOnPage]  { pageNo: 횟수 } — 해당 pageNo 의 처음 N 번 호출은 0건 반환
  */
 export function makeMockClient(opt = {}) {
@@ -47,10 +50,22 @@ export function makeMockClient(opt = {}) {
     async listHospitals({ pageNo = 1, numOfRows = 100 } = {}) {
       listCallNo += 1;
       calls.push(`list:p${pageNo}`);
-      if (opt.listThrowFirst && listCallNo <= opt.listThrowFirst) {
-        const e = new Error('mock list gateway error');
-        e.reason = 'gateway';
-        throw e;
+      if ((opt.listThrowFirst && listCallNo <= opt.listThrowFirst) ||
+          (opt.listThrowFrom && listCallNo >= opt.listThrowFrom)) {
+        throw new HiraError('mock: HIRA getHospBasisList 재시도 소진', {
+          op: 'getHospBasisList',
+          reason: opt.listThrowReason ?? 'gateway',
+          attempts: 3,
+          lastResultCode: opt.listThrowResultCode ?? null,
+        });
+      }
+      if (opt.listAbnormalFirst && listCallNo <= opt.listAbnormalFirst) {
+        return {
+          format: 'json', gatewayError: true,
+          resultCode: opt.listAbnormalCode ?? '1',
+          resultMsg: 'APPLICATION ERROR',
+          totalCount: null, numOfRows, pageNo, items: [],
+        };
       }
       const emptyN = opt.listEmptyFirst ?? 0;
       const pageBudget = Number(pageEmptyBudget[pageNo]) > 0;

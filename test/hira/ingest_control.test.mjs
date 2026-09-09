@@ -946,6 +946,38 @@ test('화면에 "다시 눌러" 자동 안내 없음 + 실패 시 "중단·보�
   assert.doesNotMatch(g.html, /③.{0,4}다시.{0,4}(눌|실행)/);
 });
 
+test('통합 ③ 재시험 재현: 2차 수집 목록 throw 3회 → flash 실패(list_fetch_failed), 시설 0, ingestion_runs 0', async () => {
+  const sb = makeMockSb();
+  const h = createHandler({ env: baseEnv(), sb, runIngest: realRunIngest(sb, { listTotal: 3, listThrowFirst: 3, listThrowReason: 'gateway' }) });
+  const { post } = await getThenPost(h, {
+    sb, step: 'ingest', confirm: CONFIRM_PHRASE,
+    extraCookies: { '__Host-ic_dr': mintToken(SECRET, 'dryrun') },
+  });
+  const fl = flashOf(post);
+  assert.equal(fl.ok, false);
+  assert.equal(fl.detail.reason, 'list_fetch_failed');
+  assert.equal(fl.detail.attempts, 3);
+  assert.equal(fl.detail.hospitalCountAfter, 0);
+  assert.equal(sb.tables.facilities.length, 0);
+  assert.equal(sb.tables.ingestion_runs.length, 0);
+  const blob = JSON.stringify(fl);
+  assert.equal(/serviceKey|supabase\.co|apis\.data\.go\.kr|JDQ4[A-Za-z0-9+/]{12}/.test(blob), false);
+});
+
+test('통합 ③: 2차 수집 목록 throw 1회 후 회복 → flash ok, new 3, listRetries 1', async () => {
+  const sb = makeMockSb();
+  const h = createHandler({ env: baseEnv(), sb, runIngest: realRunIngest(sb, { listTotal: 3, listThrowFirst: 1 }) });
+  const { post } = await getThenPost(h, {
+    sb, step: 'ingest', confirm: CONFIRM_PHRASE,
+    extraCookies: { '__Host-ic_dr': mintToken(SECRET, 'dryrun') },
+  });
+  const fl = flashOf(post);
+  assert.equal(fl.ok, true);
+  assert.equal(fl.detail.persisted.new, 3);
+  assert.equal(fl.detail.listRetries, 1);
+  assert.equal(sb.tables.facilities.filter((f) => f.domain === 'HOSPITAL').length, 3);
+});
+
 test('통합: control flash detail 에 ykiho·raw·URL·키 없음 (익명 숫자만)', async () => {
   const sb = makeMockSb();
   const h = createHandler({ env: baseEnv(), sb, runIngest: realRunIngest(sb, { listTotal: 0 }) });

@@ -115,7 +115,8 @@ export function createHandler(deps = {}) {
         const persistInputCount = items.length;
 
         // ── fail-closed (1) : 기대 수집 수(limit) 만큼 정규화되지 않으면 persist 미호출 ──
-        //   HIRA 목록이 정상 resultCode 로 0건을 반환하는 data.go.kr 간헐 장애 대비.
+        //   (목록 자체가 실패/빈응답이면 collect 가 HiraError 를 throw → 아래 catch 에서 502.
+        //    여기 오는 건 "목록은 받았으나 정규화가 3건이 안 된" 부분 실패 케이스.)
         //   시설/프로필/소스에 아무것도 쓰지 않는다.
         if (persistInputCount !== limit) {
           res.status(422).json({
@@ -125,6 +126,7 @@ export function createHandler(deps = {}) {
             collectedCount,
             normalizedCount,
             persistInputCount,
+            listRetries: Number.isFinite(result?.stats?.listRetries) ? result.stats.listRetries : null,
             warnings: Array.isArray(safe.warnings) ? safe.warnings.length : 0,
           });
           return;
@@ -157,6 +159,7 @@ export function createHandler(deps = {}) {
           collectedCount,
           normalizedCount,
           persistInputCount,
+          listRetries: Number.isFinite(result?.stats?.listRetries) ? result.stats.listRetries : null,
           failures: persisted.failures, // ykiho 마스킹됨
           ...safe,
         });

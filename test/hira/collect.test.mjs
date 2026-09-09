@@ -51,14 +51,15 @@ test('빈 상세 응답 처리 (facility 0건)', async () => {
   assert.equal(r._normalizedAll[0].hospital.bed_total, null);
 });
 
-test('목록 자체 실패 — 현재까지로 진행, 경고 기록', async () => {
+test('목록 첫 페이지부터 실패 (수집 0건) — 빈 배열로 "성공" 반환 안 함, HiraError throw', async () => {
   const c = makeMockClient({ listTotal: 5 });
   c.listHospitals = async () => {
-    throw Object.assign(new Error('gateway down'), { reason: 'gateway' });
+    throw Object.assign(new Error('gateway down'), { name: 'HiraError', reason: 'gateway' });
   };
-  const r = await collectHospitals(c, { maxInstitutions: 5 });
-  assert.equal(r.stats.deduped, 0);
-  assert.ok(r.warnings.some((w) => /목록/.test(w)));
+  await assert.rejects(
+    collectHospitals(c, { maxInstitutions: 5, sleepImpl: async () => {} }),
+    (e) => e.name === 'HiraError' && e.reason === 'list_fetch_failed'
+  );
 });
 
 test('11. 샘플·failures 에 ykiho 원문이 노출되지 않음', async () => {
