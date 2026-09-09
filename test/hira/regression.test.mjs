@@ -40,18 +40,33 @@ test('1B-3A: api/hospital/ingest.js 는 HOSPITAL_INGEST_PERSIST 게이트 뒤에
   assert.ok(src.includes("String(q.dryRun) === 'false'"));
 });
 
-test('1B-3B 안전: persist.js 는 hostname 을 정확 일치(===)로만 비교', () => {
+test('1B-3B 안전: persist.js 는 hostname 을 정확 일치(===)로만 비교, 허용 host 는 env 로만', () => {
   const src = read('lib/hira/persist.js');
   // verifyPreviewDbUrl 존재 + URL 파싱
   assert.ok(src.includes('function verifyPreviewDbUrl'), 'verifyPreviewDbUrl 없음');
   assert.ok(/new URL\(/.test(src), 'URL 파싱 안 함');
-  assert.ok(/u\.hostname !== expectedHost/.test(src), 'hostname 정확 비교(!==) 없음');
+  assert.ok(/u\.hostname !== host\b/.test(src), 'hostname 정확 비교(!==) 없음');
   // 부분 일치 함수 금지 (hostname 비교에)
   assert.equal(/\.hostname[^\n]*\.(includes|endsWith|startsWith)\(/.test(src), false, 'hostname 부분 비교 사용');
   // protocol https 확인
   assert.ok(src.includes("u.protocol !== 'https:'"));
   // 실패 reason 은 wrong_preview_db 만
   assert.ok(src.includes("reason: 'wrong_preview_db'"));
+  // 허용 hostname 은 env(HOSPITAL_INGEST_DB_HOST) 로만 — 코드에 실제 프로젝트 ref 하드코딩 금지
+  assert.ok(src.includes('HOSPITAL_INGEST_DB_HOST'), '허용 host env 이름 없음');
+  assert.equal(/['"][a-z0-9]{16,}\.supabase\.co['"]/.test(src), false, 'Supabase 프로젝트 ref 하드코딩됨');
+  assert.equal(src.includes('EXPECTED_PREVIEW_DB_HOST'), false, '구 하드코딩 상수 잔존');
+});
+
+test('1B-3B 안전: 허용 host 미지정이면 verifyPreviewDbUrl 은 fail-closed', async () => {
+  const { verifyPreviewDbUrl, allowedIngestDbHost } = await import('../../lib/hira/persist.js');
+  assert.equal(allowedIngestDbHost({}), null);
+  const u = 'https://anything.supabase.co';
+  for (const host of [undefined, null, '', '   ']) {
+    const r = verifyPreviewDbUrl(u, host);
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'wrong_preview_db');
+  }
 });
 
 test('기존 요양원 수집기/정규화 파일은 이 브랜치에서 변경되지 않음', () => {
