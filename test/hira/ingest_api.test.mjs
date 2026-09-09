@@ -192,7 +192,7 @@ test('11(api). 응답에 ykiho 원문·serviceKey 없음 (dry-run)', async () =>
   assert.equal(blob.includes('serviceKey'), false);
 });
 
-test('HIRA 목록 실패 → dry-run 200, deduped 0, 토큰 스크럽', async () => {
+test('HIRA 목록 첫 페이지부터 실패 → dry-run 도 성공 아님 (502 collect_failed), 토큰 스크럽', async () => {
   const res = mkRes();
   await createHandler({
     ...deps(),
@@ -201,7 +201,9 @@ test('HIRA 목록 실패 → dry-run 200, deduped 0, 토큰 스크럽', async ()
       listHospitals: async () => { throw new Error('boom AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'); },
     }),
   })(mkReq({ headers: auth }), res);
-  assert.equal(res.statusCode, 200);
-  assert.equal(res.body.stats.deduped, 0);
+  assert.equal(res.statusCode, 502);
+  assert.equal(res.body.error, 'collect_failed');
+  assert.equal(res.body.reason, 'list_fetch_failed');
+  assert.notEqual(res.body.ok, true);
   assert.equal(/A{40,}/.test(JSON.stringify(res.body)), false);
 });
