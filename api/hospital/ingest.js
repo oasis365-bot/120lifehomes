@@ -24,6 +24,10 @@ import { sb as realSb } from '../../lib/db.js';
 export const config = { maxDuration: 60 };
 
 const LIMIT_MAX = 3;
+// config.maxDuration(60s) 보다 넉넉히 앞서 수집을 중단하고 502 를 반환할 wall-clock 예산.
+// (남은 ~20s 는 응답 직렬화 + control 화면의 전후 DB 조회 + Vercel 게이트웨이 오버헤드용.)
+// 정상 수집은 ~13s 이므로 재시도 여유도 충분.
+const COLLECT_BUDGET_MS = 40_000;
 
 function safeEqual(a, b) {
   const A = Buffer.from(String(a || ''), 'utf8');
@@ -54,6 +58,7 @@ export function createHandler(deps = {}) {
   const assertDb = deps.assertDb ?? assertPreviewDb;
   const sbImpl = deps.sbImpl ?? realSb;
   const env = deps.env ?? process.env;
+  const now = typeof deps.now === 'function' ? deps.now : Date.now;
 
   return async function handler(req, res) {
     if (env.VERCEL_ENV === 'production') {
@@ -105,8 +110,9 @@ export function createHandler(deps = {}) {
       }
 
       try {
-        const client = createClient({ key });
-        const result = await collect(client, { maxInstitutions: limit, pageSize: 100 });
+        const deadlineMs = now() + COLLECT_BUDGET_MS;
+        const client = createClient({ key, deadlineMs, now });
+        const result = await collect(client, { maxInstitutions: limit, pageSize: 100, deadlineMs, now });
         const { _normalizedAll, ...safe } = result;
         const items = Array.isArray(_normalizedAll) ? _normalizedAll : [];
 
@@ -185,9 +191,22 @@ export function createHandler(deps = {}) {
     }
 
     try {
-      const client = createClient({ key });
-      const result = await collect(client, { maxInstitutions: limit, pageSize: 100 });
+      // dry-run 도 실 적재와 동일한 시간 안전장치.
+      const deadlineMs = now() + COLLECT_BUDGET_MS;
+      const client = createClient({ key, deadlineMs, now });
+      const result = await collect(client, { maxInstitutions: limit, pageSize: 100, deadlineMs, now });
       const { _normalizedAll, ...safe } = result;
+      // dry-run 도 정확히 limit 건을 완성해야 "성공". (부분·0건은 502.)
+      if ((result?.stats?.normalized ?? 0) !== limit) {
+        res.status(502).json({
+          error: 'collect_failed',
+          reason: 'incomplete_collect',
+          collectedCount: Number.isFinite(result?.stats?.deduped) ? result.stats.deduped : null,
+          normalizedCount: Number.isFinite(result?.stats?.normalized) ? result.stats.normalized : null,
+          listRetries: Number.isFinite(result?.stats?.listRetries) ? result.stats.listRetries : null,
+        });
+        return;
+      }
       res.status(200).json({ ok: true, dryRun: true, dbWrites: 0, ...safe });
     } catch (e) {
       const info =

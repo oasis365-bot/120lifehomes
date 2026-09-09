@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHandler } from '../../api/hospital/ingest.js';
 import { collectHospitals } from '../../lib/hira/collect.js';
+import { createHiraClient } from '../../lib/hira/client.js';
 import { persistCollected, EXPECTED_PREVIEW_DB_HOST } from '../../lib/hira/persist.js';
 import { makeMockClient } from './mockClient.mjs';
 import { makeMockSb } from './mockSb.mjs';
@@ -190,12 +191,72 @@ test('통합: 2차 수집 목록 throw 1회 후 회복 → 정상 적재 new=3, 
 test('통합: 목록 비정상 resultCode(code 1, 비일시적) → 502 list_abnormal_result, persist 미호출, 재시도 없음', async () => {
   const sb = makeMockSb();
   const res = mkRes();
-  await createHandler(realDeps(sb, { listTotal: 3, listAbnormalFirst: 3, listAbnormalCode: '1' }))(
+  await createHandler(realDeps(sb, { listTotal: 3, listAbnormalFirst: 1, listAbnormalCode: '1' }))(
     mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
   assert.equal(res.statusCode, 502);
   assert.equal(res.body.reason, 'list_abnormal_result');
   assert.equal(res.body.lastResultCode, '1');
   assert.equal(sb.tables.facilities.length, 0);
+});
+
+// ── wall-clock deadline: 플랫폼 하드 타임아웃 전에 502 ──────────────
+test('통합: 상세 수집이 예산 초과(느린 HIRA) → 60s 전에 502 deadline_exceeded, persist 미호출, 시설·로그 0', async () => {
+  let clock = 0;
+  const now = () => clock;
+  const c = makeMockClient({ listTotal: 3, tick: () => { clock += 4000; } }); // 매 HIRA 콜 4s
+  const sb = makeMockSb();
+  const res = mkRes();
+  await createHandler({
+    env: env(), createClient: () => c, collect: collectHospitals, persist: persistCollected,
+    sbImpl: sb, assertDb: async () => ({ ok: true }), now,
+  })(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+
+  assert.equal(res.statusCode, 502);
+  assert.equal(res.body.reason, 'deadline_exceeded');
+  assert.ok(clock < 45_000, `시뮬 경과 ${clock}ms — 예산(40s)+여유 안`);
+  assert.equal(sb.tables.facilities.length, 0);
+  assert.equal(sb.tables.ingestion_runs.length, 0);
+  const blob = JSON.stringify(res.body);
+  assert.equal(/serviceKey|apis\.data\.go\.kr|https?:\/\/|JDQ4/.test(blob), false);
+});
+
+test('통합: 최악(모든 HIRA 호출 timeout, 실제 client) → 60s 전에 502, DB write 0', async () => {
+  let clock = 0;
+  const now = () => clock;
+  const ff = async () => { clock += 6500; const e = new Error('t'); e.name = 'AbortError'; throw e; };
+  const createClient = (o) => createHiraClient({
+    ...o, key: 'k', fetchImpl: ff, sleepImpl: async (ms) => { clock += Math.max(0, ms); },
+    now, minIntervalMs: 20, maxRetries: 3,
+  });
+  const sb = makeMockSb();
+  const res = mkRes();
+  await createHandler({
+    env: env(), createClient, collect: collectHospitals, persist: persistCollected,
+    sbImpl: sb, assertDb: async () => ({ ok: true }), now,
+  })(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+
+  assert.equal(res.statusCode, 502);
+  assert.ok(['list_fetch_failed', 'deadline_exceeded', 'deadline', 'timeout'].includes(res.body.reason), res.body.reason);
+  assert.ok(clock < 55_000, `시뮬 경과 ${clock}ms`);
+  assert.equal(sb.tables.facilities.length, 0);
+  assert.equal(sb.countWrites(), 0);
+});
+
+test('통합 dry-run: 예산 초과 → 502 (dry-run 도 동일 안전장치), DB write 0', async () => {
+  let clock = 0;
+  const now = () => clock;
+  const c = makeMockClient({ listTotal: 3, tick: () => { clock += 6000; } });
+  const sb = makeMockSb();
+  const res = mkRes();
+  await createHandler({
+    env: env(), createClient: () => c, collect: collectHospitals, persist: persistCollected,
+    sbImpl: sb, assertDb: async () => ({ ok: true }), now,
+  })(mkReq({ headers: auth, query: { limit: '3' } }), res); // dryRun 기본 true
+
+  assert.equal(res.statusCode, 502);
+  assert.notEqual(res.body.ok, true);
+  assert.ok(clock < 45_000);
+  assert.equal(sb.countWrites(), 0);
 });
 
 // ── _normalizedAll 전달 경로 ───────────────────────────────────────

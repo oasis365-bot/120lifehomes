@@ -22,10 +22,12 @@ const fx = (name) =>
  * @param {number} [opt.listAbnormalFirst=0] 처음 N 번의 listHospitals 호출은 비정상 resultCode 반환 (client 가 "비일시적" 으로 그대로 반환한 것)
  * @param {string} [opt.listAbnormalCode='1']  위 비정상 응답의 resultCode
  * @param {Object<number,number>} [opt.emptyOnPage]  { pageNo: 횟수 } — 해당 pageNo 의 처음 N 번 호출은 0건 반환
+ * @param {()=>void} [opt.tick]  매 HIRA 메서드 호출마다 1회 실행 (가짜 시계 전진용)
  */
 export function makeMockClient(opt = {}) {
   const listItems = fx('hospBasisList_clCd28.json').items;
   const calls = [];
+  const tick = typeof opt.tick === 'function' ? opt.tick : () => {};
   const failSteps = opt.failSteps ?? new Set();
   const emptySteps = opt.emptySteps ?? new Set();
   let listCallNo = 0;
@@ -33,6 +35,7 @@ export function makeMockClient(opt = {}) {
 
   const guard = (step, parsed) => {
     calls.push(step);
+    tick();
     if (failSteps.has(step)) {
       const e = new Error(`mock fail: ${step}`);
       e.reason = 'gateway';
@@ -50,6 +53,7 @@ export function makeMockClient(opt = {}) {
     async listHospitals({ pageNo = 1, numOfRows = 100 } = {}) {
       listCallNo += 1;
       calls.push(`list:p${pageNo}`);
+      tick();
       if ((opt.listThrowFirst && listCallNo <= opt.listThrowFirst) ||
           (opt.listThrowFrom && listCallNo >= opt.listThrowFrom)) {
         throw new HiraError('mock: HIRA getHospBasisList 재시도 소진', {
