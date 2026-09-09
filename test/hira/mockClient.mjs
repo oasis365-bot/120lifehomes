@@ -13,6 +13,7 @@ const fx = (name) =>
  * @param {Object} [opt]
  * @param {number} [opt.listTotal=5]        목록에 담을 (중복 포함) 항목 수
  * @param {number} [opt.dupEvery]           n번째마다 ykiho 중복 삽입
+ * @param {number|number[]} [opt.dropNameAt]  이 인덱스 항목의 yadmNm(기관명) 제거 → 필수필드 미충족
  * @param {Set<string>} [opt.failSteps]     이 step 이름은 항상 throw ('facility'|'evaluation'...)
  * @param {Set<string>} [opt.emptySteps]    이 step 은 빈 결과 반환
  * @param {number} [opt.listEmptyFirst=0]   처음 N 번의 listHospitals 호출은 "정상 resultCode + 0건" 반환
@@ -89,13 +90,16 @@ export function makeMockClient(opt = {}) {
         return r;
       }
       const n = opt.listTotal ?? 5;
+      const dropName = opt.dropNameAt != null ? new Set([].concat(opt.dropNameAt)) : null;
       const pool = [];
       for (let i = 0; i < n; i++) {
         const src = listItems[i % listItems.length];
         // 고유 ykiho 로 치환. dupEvery 이면 i=0 과 동일한 ykiho 를 재사용해 실제 중복 생성.
         let ykiho = `${listItems[0].ykiho}#${i}`;
         if (opt.dupEvery && i > 0 && i % opt.dupEvery === 0) ykiho = `${listItems[0].ykiho}#0`;
-        pool.push({ ...src, ykiho });
+        const item = { ...src, ykiho };
+        if (dropName && dropName.has(i)) delete item.yadmNm; // 기관명 누락(필수필드 미충족) 시뮬레이션
+        pool.push(item);
       }
       const start = (pageNo - 1) * numOfRows;
       const slice = pool.slice(start, start + numOfRows);

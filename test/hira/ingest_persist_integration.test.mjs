@@ -108,6 +108,65 @@ test('통합: collect 가 2건만(기대 3) → 422 collect_count_mismatch, pers
   assert.equal(sb.tables.facilities.length, 0);
 });
 
+test('통합: 3건 중 하나 기관명 누락 → persist 미호출, 모든 테이블 0, sb write 0', async () => {
+  const sb = makeMockSb();
+  let persistCalled = false;
+  const res = mkRes();
+  // 목록 3건, 그 중 2번째 기관명(yadmNm) 없음 → 정규화 유효 2건
+  await createHandler(realDeps(sb, { listTotal: 3, dropNameAt: 1 }, {
+    persist: async (...a) => { persistCalled = true; return persistCollected(...a); },
+  }))(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+
+  assert.equal(res.statusCode, 422);
+  assert.equal(res.body.error, 'collect_count_mismatch');
+  // collect 가 이미 걸러내므로 persistInputCount 자체가 2 (1차 게이트에서 차단)
+  assert.equal(res.body.persistInputCount, 2);
+  assert.equal(persistCalled, false);
+
+  // ── 부분 저장 없음: 모든 테이블 0 ──
+  assert.equal(sb.tables.facilities.length, 0);
+  assert.equal(sb.tables.hospital_profiles.length, 0);
+  assert.equal(sb.tables.facility_sources.length, 0);
+  assert.equal(sb.tables.facility_evaluations.length, 0);
+  assert.equal(sb.tables.ingestion_runs.length, 0);
+  assert.equal(sb.countWrites(), 0);
+});
+
+test('통합: collect 가 3건 반환하나 그 중 하나 name="" (2차 게이트) → persist 미호출, 테이블 0, sb write 0', async () => {
+  // collect 를 직접 주입해 "3건인데 하나가 무효" 상태를 만들어 ingest.js 2차 게이트만 검증
+  const sb = makeMockSb();
+  let persistCalled = false;
+  const mkItem = (n, name) => ({
+    hospital: {
+      id: `H-INTEG_${n}`, external_id: `INTEG_${n}`, name,
+      normalized_hash: `h${n}`, domain: 'HOSPITAL',
+    },
+    evaluation: null,
+    raw: { basis: { ykiho: `INTEG_${n}` } },
+  });
+  const res = mkRes();
+  await createHandler({
+    ...realDeps(sb),
+    collect: async () => ({
+      _normalizedAll: [mkItem(1, 'A'), mkItem(2, ''), mkItem(3, 'C')], // 3건이지만 2번째 name 공백
+      stats: { deduped: 3, normalized: 3, listRetries: 0 },
+      warnings: [], failures: [], samples: [], meta: {},
+    }),
+    persist: async (...a) => { persistCalled = true; return persistCollected(...a); },
+  })(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+
+  assert.equal(res.statusCode, 422);
+  assert.equal(res.body.reason, 'required_fields_incomplete');
+  assert.equal(res.body.validCount, 2);
+  assert.equal(persistCalled, false);
+  assert.equal(sb.tables.facilities.length, 0);
+  assert.equal(sb.tables.hospital_profiles.length, 0);
+  assert.equal(sb.tables.facility_sources.length, 0);
+  assert.equal(sb.tables.facility_evaluations.length, 0);
+  assert.equal(sb.tables.ingestion_runs.length, 0);
+  assert.equal(sb.countWrites(), 0);
+});
+
 test('통합: 저장 결과 합계가 입력수와 불일치 → 500 persist_count_mismatch, 성공 아님', async () => {
   const sb = makeMockSb();
   const res = mkRes();

@@ -25,6 +25,30 @@ test('10. ykiho 중복 제거', async () => {
   assert.equal(new Set(ids).size, ids.length);
 });
 
+test('full collect — 정규화 결과 필수필드(name) 누락 → normalizedAll 에서 제외, failures 기록', async () => {
+  const c = makeMockClient({ listTotal: 3, dropNameAt: 1 }); // 2번째 기관 기관명 없음
+  const r = await collectHospitals(c, { maxInstitutions: 3 });
+  assert.equal(r.stats.deduped, 3);           // 목록에는 3건
+  assert.equal(r.stats.normalized, 2);        // 저장 가능한 건 2건
+  assert.equal(r._normalizedAll.length, 2);
+  for (const it of r._normalizedAll) {
+    assert.ok(it.hospital.id && it.hospital.external_id && it.hospital.name);
+  }
+  const req = r.failures.filter((f) => f.step === 'required_fields');
+  assert.equal(req.length, 1);
+  assert.equal(req[0].reason, 'missing');
+  assert.ok(/name/.test(req[0].detail));
+  assert.ok(req[0].ykiho.includes('…') || req[0].ykiho.includes('***')); // 마스킹
+});
+
+test('listOnly(readiness) — 필수필드 누락도 동일하게 제외', async () => {
+  const c = makeMockClient({ listTotal: 3, dropNameAt: 0 });
+  const r = await collectHospitals(c, { maxInstitutions: 3, listOnly: true });
+  assert.equal(r.stats.normalized, 2);
+  assert.equal(r._normalizedAll.length, 2);
+  assert.equal(r.failures.filter((f) => f.step === 'required_fields').length, 1);
+});
+
 test('maxInstitutions 상한 20 강제', async () => {
   const c = makeMockClient({ listTotal: 100 });
   const r = await collectHospitals(c, { maxInstitutions: 999 });

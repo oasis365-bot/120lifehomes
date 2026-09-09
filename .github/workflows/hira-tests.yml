@@ -1,13 +1,27 @@
-# 요양병원(HIRA) 어댑터 + lib/db 키호환 테스트 — feature/hospital-hira-adapter 전용
+# 요양병원(HIRA) 어댑터 + lib/db 키호환 + LTC 회귀 정적 테스트
 #  · 시크릿 없음 (DATA_GO_KR_KEY / SUPABASE_* 미사용). API 실호출·DB 접근 없음.
-#  · node --test (Node 20.x 내장 러너, 파일/디렉터리 명시). 무의존성.
-#  · main / production / 배포에 영향 없음.
+#  · node --check (api/ + lib/ 전 파일) + node --test (Node 20.x 내장 러너). 무의존성.
+#  · 빌드·배포·환경변수에 영향 없음 (테스트만).
+#
+#  트리거:
+#   · push  → main, feature/hospital-hira-adapter
+#   · pull_request → base 가 main 인 모든 PR
+#   · 수동 (workflow_dispatch)
+#  중복 방지: concurrency group 을 브랜치명으로 정규화(head_ref || ref_name).
+#   → feature 브랜치에 push + 그 브랜치의 PR 이 동시에 트리거돼도 같은 group 이라
+#     먼저 뜬 run 이 취소되고 최신 run 하나만 남는다. main push 는 group 'main' 로 독립.
 name: hira-tests
 
 on:
   push:
-    branches: ['feature/hospital-hira-adapter']
+    branches: ['main', 'feature/hospital-hira-adapter']
+  pull_request:
+    branches: ['main']
   workflow_dispatch:
+
+concurrency:
+  group: hira-tests-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

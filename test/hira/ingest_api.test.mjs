@@ -161,6 +161,26 @@ test('19. persist 활성 + limit 상한 3', async () => {
   assert.equal(seen.maxInstitutions, 3);
 });
 
+test('19b. persist 활성 + collect 3건 반환하나 하나 name 누락 → 422 required_fields_incomplete, persist 미호출', async () => {
+  let persistCalled = false;
+  const item = (n, name) => ({ hospital: { id: `H-${n}`, external_id: `${n}`, name, normalized_hash: `h${n}` }, evaluation: null, raw: {} });
+  const res = mkRes();
+  await createHandler({
+    ...persistOn(),
+    assertDb: async () => ({ ok: true }),
+    collect: async () => ({
+      _normalizedAll: [item('a', 'A'), item('b', null), item('c', 'C')],
+      stats: { deduped: 3, normalized: 3, listRetries: 0 }, warnings: [], failures: [], samples: [], meta: {},
+    }),
+    persist: async () => { persistCalled = true; return { runId: 1, status: 'ok', stats: {}, failures: [] }; },
+  })(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+  assert.equal(res.statusCode, 422);
+  assert.equal(res.body.error, 'collect_count_mismatch');
+  assert.equal(res.body.reason, 'required_fields_incomplete');
+  assert.equal(res.body.validCount, 2);
+  assert.equal(persistCalled, false);
+});
+
 test('20. persist 활성 + 실제 assertPreviewDb + 허용 host 와 다른 SUPABASE_URL → 409 wrong_preview_db, persist·collect 미실행', async () => {
   let touched = false;
   const sb = makeMockSb();

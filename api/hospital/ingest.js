@@ -10,7 +10,8 @@
 //      - HOSPITAL_INGEST_DB_HOST 에 지정된 hostname 과 SUPABASE_URL 정확 일치
 //        (미설정/불일치면 assertPreviewDb → 409 wrong_preview_db, DB 접속 0 — fail-closed)
 //      - assertPreviewDb(): 운영 Supabase / LTC 행 존재 / hospital_module ON / 스키마 미완 → 409
-//      - limit 최대 3
+//      - limit 최대 3. 정규화 결과가 정확히 limit 건이고 전부 id/external_id/name 을
+//        갖췄을 때만 persist. 하나라도 미달이면 persist 미호출 + 422 (부분 저장 없음).
 //  · DATA_GO_KR_KEY / CRON_SECRET / DB URL·ref / ykiho 원문 을 응답·로그에 출력하지 않음.
 //    HIRA 실패 원인은 allowlist(failureKind/attemptSummary/elapsedBucket)로만.
 //
@@ -143,7 +144,29 @@ export function createHandler(deps = {}) {
           return;
         }
 
-        const persisted = await persist(items, { sb: sbImpl, env });
+        // ── fail-closed (1b) : persist 호출 직전, 정규화 결과 "전체" 에 저장 필수필드가 있는지 재확인 ──
+        //   (collect 도 걸러내지만, 여기서 다시 검증해 "일부 행만 먼저 저장" 경로를 원천 차단.)
+        const REQUIRED_HOSPITAL_FIELDS = ['id', 'external_id', 'name'];
+        const validItems = items.filter((it) => {
+          const h = it && it.hospital;
+          return h && REQUIRED_HOSPITAL_FIELDS.every((k) => h[k] != null && h[k] !== '');
+        });
+        if (validItems.length !== limit) {
+          res.status(422).json({
+            error: 'collect_count_mismatch',
+            dryRun: false,
+            reason: 'required_fields_incomplete',
+            expected: limit,
+            collectedCount,
+            normalizedCount,
+            persistInputCount,
+            validCount: validItems.length,
+            listRetries: Number.isFinite(result?.stats?.listRetries) ? result.stats.listRetries : null,
+          });
+          return;
+        }
+
+        const persisted = await persist(validItems, { sb: sbImpl, env });
         const st = persisted.stats || {};
         const writeSum =
           (st.new || 0) + (st.updated || 0) + (st.unchanged || 0) + (st.partial || 0) + (st.failed || 0);
