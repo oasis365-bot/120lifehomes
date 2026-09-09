@@ -172,13 +172,13 @@ const cleanState = (extra = {}) => ({
 test('decideAvailability: 깨끗+HOSPITAL0 → dryrun/ingest 가능, idempotency 불가', () => {
   const a = decideAvailability(cleanState());
   assert.equal(a.hardBlock, false);
-  assert.equal(a.dryrun, true);
+  assert.equal(a.ready, true);
   assert.equal(a.ingest, true);
   assert.equal(a.idempotency, false);
 });
 test('decideAvailability: HOSPITAL=3 → idempotency 만', () => {
   const a = decideAvailability(cleanState({ hospitalCount: 3 }));
-  assert.equal(a.dryrun, false);
+  assert.equal(a.ready, false);
   assert.equal(a.ingest, false);
   assert.equal(a.idempotency, true);
 });
@@ -186,12 +186,12 @@ test('decideAvailability: HOSPITAL>3 → 전부 차단', () => {
   const a = decideAvailability(cleanState({ hospitalCount: 4 }));
   assert.equal(a.overfilled, true);
   assert.equal(a.hardBlock, true);
-  assert.equal(a.dryrun || a.ingest || a.idempotency, false);
+  assert.equal(a.ready || a.ingest || a.idempotency, false);
 });
 test('decideAvailability: HOSPITAL=1,2 (부분) → 전부 차단', () => {
   for (const n of [1, 2]) {
     const a = decideAvailability(cleanState({ hospitalCount: n }));
-    assert.equal(a.dryrun || a.ingest || a.idempotency, false, `n=${n}`);
+    assert.equal(a.ready || a.ingest || a.idempotency, false, `n=${n}`);
   }
 });
 test('decideAvailability: LTC>0 / flag ON / wrongDB / schema / persist off → hardBlock', () => {
@@ -324,9 +324,9 @@ test('정확한 Origin + Sec-Fetch-Site same-origin + 정확한 Host → 통과 
   const sb = makeMockSb();
   const spy = makeRunIngestSpy(sb);
   const h = createHandler({ env: baseEnv(), sb, runIngest: spy });
-  const { post } = await getThenPost(h, { sb, step: 'dryrun' }); // vercelPostHeaders = 정확한 Origin/Host/SFS
+  const { post } = await getThenPost(h, { sb, step: 'ready' }); // vercelPostHeaders = 정확한 Origin/Host/SFS
   assert.equal(post.statusCode, 302);
-  assert.deepEqual(spy.calls, [{ dryRun: true }]);
+  assert.equal(spy.calls.length, 0);
 });
 
 test('GET HTML·쿠키에 비밀·토큰원문·URL 노출 없음', async () => {
@@ -348,7 +348,7 @@ test('POST 잘못된 Origin → 403 forbidden_origin, 실행 없음, boolean 진
   const sb = makeMockSb();
   const spy = makeRunIngestSpy(sb);
   const h = createHandler({ env: baseEnv(), sb, runIngest: spy });
-  const { post } = await getThenPost(h, { sb, step: 'dryrun', headerOverrides: { origin: 'https://evil.example' } });
+  const { post } = await getThenPost(h, { sb, step: 'ready', headerOverrides: { origin: 'https://evil.example' } });
   assert.equal(post.statusCode, 403);
   assert.equal(post.body.error, 'forbidden_origin');
   assert.equal(spy.calls.length, 0);
@@ -373,7 +373,7 @@ test('POST 유사 도메인 Origin / forwarded-host → 403 forbidden_origin', a
     `http://${BRANCH_ALIAS_HOST}`,
     'null',
   ]) {
-    const { post } = await getThenPost(h, { sb, step: 'dryrun', headerOverrides: { origin } });
+    const { post } = await getThenPost(h, { sb, step: 'ready', headerOverrides: { origin } });
     assert.equal(post.body.error, 'forbidden_origin', origin);
     assert.equal(post.body.diagnostics.origin_exact_match, false);
   }
@@ -385,15 +385,15 @@ test('POST Origin 누락 / Sec-Fetch-Site 누락·cross-site → 403 forbidden_o
   const spy = makeRunIngestSpy(sb);
   const h = createHandler({ env: baseEnv(), sb, runIngest: spy });
 
-  const noOrigin = await getThenPost(h, { sb, step: 'dryrun', headerOverrides: { origin: undefined } });
+  const noOrigin = await getThenPost(h, { sb, step: 'ready', headerOverrides: { origin: undefined } });
   assert.equal(noOrigin.post.body.error, 'forbidden_origin');
   assert.equal(noOrigin.post.body.diagnostics.origin_present, false);
 
-  const noSfs = await getThenPost(h, { sb, step: 'dryrun', headerOverrides: { 'sec-fetch-site': undefined } });
+  const noSfs = await getThenPost(h, { sb, step: 'ready', headerOverrides: { 'sec-fetch-site': undefined } });
   assert.equal(noSfs.post.body.error, 'forbidden_origin');
   assert.equal(noSfs.post.body.diagnostics.sec_fetch_site_same_origin, false);
 
-  const crossSite = await getThenPost(h, { sb, step: 'dryrun', headerOverrides: { 'sec-fetch-site': 'cross-site', origin: 'https://evil.example' } });
+  const crossSite = await getThenPost(h, { sb, step: 'ready', headerOverrides: { 'sec-fetch-site': 'cross-site', origin: 'https://evil.example' } });
   assert.equal(crossSite.post.body.error, 'forbidden_origin');
 
   assert.equal(spy.calls.length, 0);
@@ -404,7 +404,7 @@ test('POST Referer 만 맞고 Origin 틀림 → 여전히 차단 (Referer 로 �
   const spy = makeRunIngestSpy(sb);
   const h = createHandler({ env: baseEnv(), sb, runIngest: spy });
   const { post } = await getThenPost(h, {
-    sb, step: 'dryrun',
+    sb, step: 'ready',
     headerOverrides: { origin: undefined, referer: `${ORIGIN}/api/hospital/ingest-control` },
   });
   assert.equal(post.body.error, 'forbidden_origin');
@@ -417,9 +417,9 @@ test('POST 정상 Vercel 프록시 헤더(Origin + forwarded-host + Sec-Fetch-Si
   const sb = makeMockSb();
   const spy = makeRunIngestSpy(sb);
   const h = createHandler({ env: baseEnv(), sb, runIngest: spy });
-  const { post } = await getThenPost(h, { sb, step: 'dryrun' });
+  const { post } = await getThenPost(h, { sb, step: 'ready' });
   assert.equal(post.statusCode, 302); // forbidden_origin 아님
-  assert.deepEqual(spy.calls, [{ dryRun: true }]);
+  assert.equal(spy.calls.length, 0);
 });
 
 test('GET 잘못된 Host → 403 forbidden_host + boolean 진단', async () => {
@@ -542,14 +542,14 @@ test('POST CSRF 누락 / 변조 / 쿠키불일치 → 403, 실행 없음', async
   const spy = makeRunIngestSpy(sb);
   const h = createHandler({ env: baseEnv(), sb, runIngest: spy });
 
-  const a = await getThenPost(h, { sb, step: 'dryrun', omitCsrf: true });
+  const a = await getThenPost(h, { sb, step: 'ready', omitCsrf: true });
   assert.equal(a.post.statusCode, 403);
 
-  const b = await getThenPost(h, { sb, step: 'dryrun', tamper: { csrf: 'garbage.token.here' } });
+  const b = await getThenPost(h, { sb, step: 'ready', tamper: { csrf: 'garbage.token.here' } });
   assert.equal(b.post.statusCode, 403);
 
   // form 토큰은 유효하지만 쿠키가 다른 값
-  const c = await getThenPost(h, { sb, step: 'dryrun', extraCookies: { '__Host-ic_csrf': mintToken(SECRET, 'csrf') } });
+  const c = await getThenPost(h, { sb, step: 'ready', extraCookies: { '__Host-ic_csrf': mintToken(SECRET, 'csrf') } });
   assert.equal(c.post.statusCode, 403);
 
   assert.equal(spy.calls.length, 0);
@@ -571,7 +571,7 @@ test('POST CSRF 만료 → 403', async () => {
       host: BRANCH_ALIAS_HOST, origin: ORIGIN, 'sec-fetch-site': 'same-origin',
       cookie: cookieHeader(ck),
     },
-    body: { step: 'dryrun', csrf: ck['__Host-ic_csrf'] },
+    body: { step: 'ready', csrf: ck['__Host-ic_csrf'] },
   }, p);
   assert.equal(p.statusCode, 403);
   assert.equal(p.body.error, 'csrf'); // Origin 은 통과, CSRF 만료로 차단
@@ -588,23 +588,27 @@ test('bad step → 400', async () => {
 // ══════════════════════════════════════════════════════════════════
 // 단계 흐름
 // ══════════════════════════════════════════════════════════════════
-test('② dryrun: 깨끗한 DB → 302 + flash ok + __Host-ic_dr 쿠키 설정, DB write 0', async () => {
+test('② 적재 승인: 깨끗한 DB → 302 + flash ok, HIRA 0/DB write 0, __Host-ic_dr 발급', async () => {
   const sb = makeMockSb();
   const spy = makeRunIngestSpy(sb);
   const h = createHandler({ env: baseEnv(), sb, runIngest: spy });
-  const { post } = await getThenPost(h, { sb, step: 'dryrun' });
+  const { post } = await getThenPost(h, { sb, step: 'ready' });
   assert.equal(post.statusCode, 302);
   assert.equal(post.headers['Location'], '/api/hospital/ingest-control');
-  assert.deepEqual(spy.calls, [{ dryRun: true }]);
+  assert.equal(spy.calls.length, 0);            // ② 는 runIngest(HIRA collect) 호출 안 함
   const fl = flashOf(post);
   assert.equal(fl.ok, true);
-  assert.equal(fl.step, 'dryrun');
+  assert.equal(fl.step, 'ready');
+  assert.equal(fl.detail.hiraCalls, 0);
   assert.equal(fl.detail.dbWrites, 0);
+  assert.equal(fl.detail.hospitalCount, 0);
+  assert.equal(fl.detail.hospitalModule, false);
   assert.ok(cookiesOf(post)['__Host-ic_dr']);
   assert.equal(sb.tables.facilities.length, 0);
+  assert.ok(sb.calls.every((c) => c.method === 'GET')); // ② 도 읽기 전용
 });
 
-test('③ ingest: dry-run 쿠키 없음 → 차단(need_dryrun), 실행 없음', async () => {
+test('③ ingest: dry-run 쿠키 없음 → 차단(need_approval), 실행 없음', async () => {
   const sb = makeMockSb();
   const spy = makeRunIngestSpy(sb);
   const h = createHandler({ env: baseEnv(), sb, runIngest: spy });
@@ -612,7 +616,7 @@ test('③ ingest: dry-run 쿠키 없음 → 차단(need_dryrun), 실행 없음',
   assert.equal(post.statusCode, 302);
   const fl = flashOf(post);
   assert.equal(fl.ok, false);
-  assert.equal(fl.code, 'need_dryrun');
+  assert.equal(fl.code, 'need_approval');
   assert.equal(spy.calls.length, 0);
 });
 
@@ -663,16 +667,19 @@ test('③ ingest: HOSPITAL 이미 3 → 차단(hospital_not_zero), 실행 없음
   assert.equal(spy.calls.length, 0);
 });
 
-test('③ ingest: limit query 조작 무시 (내부는 항상 dryRun=false, limit 3 고정)', async () => {
+test('limit/dryRun query 조작 무시 — ② 는 게이트만, runIngest 미호출', async () => {
   const sb = makeMockSb();
   const spy = makeRunIngestSpy(sb);
   const h = createHandler({ env: baseEnv(), sb, runIngest: spy });
   const { post } = await getThenPost(h, {
-    sb, step: 'dryrun', query: { limit: '999', dryRun: 'false' },
+    sb, step: 'ready', query: { limit: '999', dryRun: 'false', readiness: '0' },
   });
-  // step=dryrun → 내부 dryRun=true. query 의 dryRun=false 는 무시됨
-  assert.deepEqual(spy.calls, [{ dryRun: true }]);
+  assert.equal(spy.calls.length, 0);
   assert.equal(flashOf(post).ok, true);
+});
+
+test('③ ingest: 내부 호출 query 는 항상 { dryRun:false, limit:3 } (internalIngestQuery)', () => {
+  assert.deepEqual(internalIngestQuery(false), { dryRun: 'false', limit: '3' });
 });
 
 test('④ idempotency: HOSPITAL=3 + 확인문구 → 1회 재실행, unchanged=3, 행 증가 없음(runs 제외)', async () => {
@@ -716,7 +723,7 @@ test('wrong DB / LTC 존재 / hospital_module ON → 모든 실행 차단, DB �
     const sb = makeMockSb();
     const spy = makeRunIngestSpy(sb);
     const h = createHandler({ env: baseEnv({ SUPABASE_URL: 'https://wdjqtynpqpzgiuzvphdr.supabase.co' }), sb, runIngest: spy });
-    const { post } = await getThenPost(h, { sb, step: 'dryrun' });
+    const { post } = await getThenPost(h, { sb, step: 'ready' });
     assert.equal(flashOf(post).ok, false);
     assert.match(flashOf(post).code, /hard_block/);
     assert.equal(spy.calls.length, 0);
@@ -736,7 +743,7 @@ test('wrong DB / LTC 존재 / hospital_module ON → 모든 실행 차단, DB �
     const sb = makeMockSb({ feature_flags: [{ key: 'hospital_module', enabled: true }] });
     const spy = makeRunIngestSpy(sb);
     const h = createHandler({ env: baseEnv(), sb, runIngest: spy });
-    const { post } = await getThenPost(h, { sb, step: 'dryrun' });
+    const { post } = await getThenPost(h, { sb, step: 'ready' });
     assert.equal(flashOf(post).ok, false);
     assert.equal(spy.calls.length, 0);
   }
@@ -746,7 +753,7 @@ test('persist 활성 아님(HOSPITAL_INGEST_PERSIST≠1) → dryrun/ingest 차�
   const sb = makeMockSb();
   const spy = makeRunIngestSpy(sb);
   const h = createHandler({ env: baseEnv({ HOSPITAL_INGEST_PERSIST: '0' }), sb, runIngest: spy });
-  const { post } = await getThenPost(h, { sb, step: 'dryrun' });
+  const { post } = await getThenPost(h, { sb, step: 'ready' });
   assert.equal(flashOf(post).ok, false);
   assert.equal(spy.calls.length, 0);
 });
@@ -908,14 +915,16 @@ test('통합 ③: HIRA 목록 3회 모두 0건 → flash 실패(transient_empty_
   assert.equal(sb.tables.ingestion_runs.length, 0);
 });
 
-test('통합 ②: dry-run 목록 3회 모두 0건 → flash 실패, ic_dr 쿠키 미설정', async () => {
+test('② 적재 승인: DB 게이트 미충족(wrong DB) → flash 실패, ic_dr 미발급, HIRA·sb 접속 0', async () => {
   const sb = makeMockSb();
-  const h = createHandler({ env: baseEnv(), sb, runIngest: realRunIngest(sb, { listTotal: 3, listEmptyFirst: 3 }) });
-  const { post } = await getThenPost(h, { sb, step: 'dryrun' });
+  const spy = makeRunIngestSpy(sb);
+  const h = createHandler({ env: baseEnv({ SUPABASE_URL: 'https://wdjqtynpqpzgiuzvphdr.supabase.co' }), sb, runIngest: spy });
+  const { post } = await getThenPost(h, { sb, step: 'ready' });
   const fl = flashOf(post);
   assert.equal(fl.ok, false);
-  assert.equal(fl.detail.reason, 'transient_empty_page_exhausted');
-  assert.equal(cookiesOf(post)['__Host-ic_dr'], undefined); // dry-run 실패 → 진행 토큰 없음
+  assert.equal(cookiesOf(post)['__Host-ic_dr'], undefined); // 승인 실패 → 진행 토큰 없음
+  assert.equal(spy.calls.length, 0);
+  assert.equal(sb.calls.length, 0); // 목적지 틀리면 접속 0
 });
 
 test('통합 ③: 첫 수집 0건 → 재시도로 3건 → flash ok, HOSPITAL 3', async () => {
@@ -977,13 +986,12 @@ test('통합 ③: 2차 수집 목록 throw (client 소진) → collect 재재시
   assert.equal(sb.tables.facilities.length, 0);
 });
 
-test('②③ 흐름: ② readiness(목록만) 성공 → ③ full collect 정확히 1회 → new 3', async () => {
+test('②③④ 흐름: ② 승인(HIRA 0, runIngest 미호출) → ③ full collect 정확히 1회 (목록도 ③ 에서만) → new 3 → ④ unchanged 3', async () => {
   const sb = makeMockSb();
-  let dryRunN = 0;
-  let wetRunN = 0;
-  let wetCollectCalls = 0;
-  let dryDetailCalls = 0;
+  let runN = 0;
+  const perRunCalls = [];
   const runIngest = async ({ dryRun }) => {
+    runN += 1;
     const c = makeMockClient({ listTotal: 3 });
     const handler = ingestCreateHandler({
       env: baseEnv(), createClient: () => c, collect: fastCollect, persist: persistCollected,
@@ -994,28 +1002,21 @@ test('②③ 흐름: ② readiness(목록만) 성공 → ③ full collect 정확
       { headers: { authorization: `Bearer ${SECRET}` }, query: internalIngestQuery(dryRun) },
       { status(x) { cap.status = x; return this; }, json(x) { cap.body = x; return this; }, setHeader() {} }
     );
-    if (dryRun) {
-      dryRunN += 1;
-      dryDetailCalls = c.calls.filter((x) => !x.startsWith('list:')).length;
-    } else {
-      wetRunN += 1;
-      wetCollectCalls = c.calls.length;
-    }
+    perRunCalls.push({ dryRun, calls: c.calls.slice() });
     return cap;
   };
   const h = createHandler({ env: baseEnv(), sb, runIngest });
 
-  // ② Readiness
-  const p2 = await getThenPost(h, { sb, step: 'dryrun' });
+  // ② 적재 승인 — HIRA·DB write 0, runIngest 미호출
+  const p2 = await getThenPost(h, { sb, step: 'ready' });
   const fl2 = flashOf(p2.post);
   assert.equal(fl2.ok, true);
-  assert.equal(fl2.detail.mode, 'readiness');
+  assert.equal(fl2.detail.hiraCalls, 0);
   assert.equal(fl2.detail.dbWrites, 0);
-  assert.equal(fl2.detail.normalized, 3);
-  assert.equal(dryDetailCalls, 0);           // ② 는 상세/평가 API 호출 0
+  assert.equal(runN, 0); // ② 는 ingest 핸들러를 아예 호출하지 않음
   assert.ok(cookiesOf(p2.post)['__Host-ic_dr']);
 
-  // ③ full collect 1회 → 그대로 persist
+  // ③ full collect (getHospBasisList 포함) 정확히 1회 → 그 결과 그대로 persist
   const p3 = await getThenPost(h, {
     sb, step: 'ingest', confirm: CONFIRM_PHRASE,
     extraCookies: { '__Host-ic_dr': cookiesOf(p2.post)['__Host-ic_dr'] },
@@ -1023,24 +1024,16 @@ test('②③ 흐름: ② readiness(목록만) 성공 → ③ full collect 정확
   const fl3 = flashOf(p3.post);
   assert.equal(fl3.ok, true);
   assert.equal(fl3.detail.persisted.new, 3);
-  assert.equal(dryRunN, 1);
-  assert.equal(wetRunN, 1);                   // ③ full collect 정확히 1회
-  assert.equal(wetCollectCalls, 22);          // 목록1 + 상세6×3 + 평가3 — 재수집 없음(44 아님)
+  assert.equal(runN, 1);                          // ③ 에서 ingest 핸들러 정확히 1회
+  assert.equal(perRunCalls[0].dryRun, false);
+  assert.equal(perRunCalls[0].calls.filter((x) => x.startsWith('list:')).length, 1); // 목록 호출 1회
+  assert.equal(perRunCalls[0].calls.length, 22);  // 목록1 + 상세6×3 + 평가3 — 재수집 없음(44 아님)
   assert.equal(sb.tables.facilities.filter((f) => f.domain === 'HOSPITAL').length, 3);
 
   // ④ 멱등성
   const p4 = await getThenPost(h, { sb, step: 'idempotency', confirm: CONFIRM_PHRASE });
-  const fl4 = flashOf(p4.post);
-  assert.equal(fl4.ok, true);
-  assert.equal(fl4.detail.persisted.unchanged, 3);
-});
-
-test('② readiness 목록 실패 → flash 실패, ic_dr 미발급 (③ 불가)', async () => {
-  const sb = makeMockSb();
-  const h = createHandler({ env: baseEnv(), sb, runIngest: realRunIngest(sb, { listTotal: 3, listThrowFirst: 3 }) });
-  const { post } = await getThenPost(h, { sb, step: 'dryrun' });
-  assert.equal(flashOf(post).ok, false);
-  assert.equal(cookiesOf(post)['__Host-ic_dr'], undefined);
+  assert.equal(flashOf(p4.post).ok, true);
+  assert.equal(flashOf(p4.post).detail.persisted.unchanged, 3);
 });
 
 test('통합: control flash detail 에 ykiho·raw·URL·키 없음 (익명 숫자만)', async () => {

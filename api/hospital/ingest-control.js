@@ -5,7 +5,8 @@
 // GET  /api/hospital/ingest-control
 //   Vercel(SSO) 로그인 사용자가 Preview 브라우저에서 1B-3B 시험 적재를
 //   단계별로 수행하는 임시 운영자 화면.
-//     ① 사전점검 → ② dry-run(3) → ③ 최초 적재(3) → ④ 멱등성 재실행
+//     ① 사전점검 → ② 적재 승인(HIRA·DB write 0) → ③ 최초 적재(3) → ④ 멱등성 재실행
+//   ※ HIRA 수집(getHospBasisList 포함)은 ③ 에서만 처음이자 유일하게 1회 실행한다.
 //
 // 안전장치:
 //   · VERCEL_ENV=production                → 항상 404
@@ -18,7 +19,7 @@
 //           __Host- 쿠키(Secure/HttpOnly/SameSite=Strict) + form hidden 이중제출,
 //           POST 는 timingSafeEqual + 서명·만료 검증, 처리 후 쿠키 만료.
 //   · POST 는 Origin 이 정확한 branch alias 인지 검증.
-//   · ③ 은 최근 5분 내 dry-run 성공(__Host-ic_dr 서명 쿠키) + "PREVIEW-3" 입력 필요.
+//   · ③ 은 최근 5분 내 ② 승인(__Host-ic_dr 서명 쿠키) + "PREVIEW-3" 입력 필요.
 //   · ④ 는 HOSPITAL=3 + "PREVIEW-3" 입력 필요.
 //   · 내부 실행은 기존 /api/hospital/ingest 핸들러를 그대로 호출(우회 저장 로직 없음).
 //     CRON_SECRET 은 그 내부 호출 인증에만 사용.
@@ -43,7 +44,7 @@ export const CONFIRM_PHRASE = 'PREVIEW-3';
 export const CSRF_TTL_MS = 5 * 60 * 1000;
 const DR_TTL_MS = 5 * 60 * 1000;
 const FLASH_TTL_MS = 60 * 1000;
-const STEPS = ['precheck', 'dryrun', 'ingest', 'idempotency'];
+const STEPS = ['precheck', 'ready', 'ingest', 'idempotency'];
 
 const C_CSRF = '__Host-ic_csrf';
 const C_DR = '__Host-ic_dr';
@@ -268,15 +269,16 @@ export function decideAvailability(state) {
     overfilled,
     hardBlock,
     precheck: true, // 읽기 전용 — 항상 가능
-    dryrun: !hardBlock && s.hospitalCount === 0,
-    ingest: !hardBlock && s.hospitalCount === 0,      // + dry-run 쿠키 + confirm 은 POST 에서
+    ready: !hardBlock && s.hospitalCount === 0,       // ② 적재 승인 (HIRA·DB write 0)
+    ingest: !hardBlock && s.hospitalCount === 0,      // + ② 승인 쿠키 + confirm 은 POST 에서
     idempotency: !hardBlock && s.hospitalCount === 3, // + confirm 은 POST 에서
   };
 }
 
 // ── 내부 실행: 기존 ingest 핸들러를 그대로 호출 (CRON_SECRET = 내부 인증에만) ──
 // limit 은 여기서 3 으로 고정 — 외부 query 는 절대 반영되지 않는다.
-// ② dry-run = readiness (목록만). ③ = full collect 1회 → 그대로 persist.
+// control 은 ③(dryRun=false)에서만 이 핸들러를 호출한다 — full collect 1회 → 그대로 persist.
+// (dryRun=true 분기는 /api/hospital/ingest 일반 기능용. control ② 는 HIRA 를 호출하지 않는다.)
 export function internalIngestQuery(dryRun) {
   return dryRun
     ? { limit: String(REQUIRED_LIMIT), readiness: '1' }
@@ -408,18 +410,18 @@ ${overfillNote}${partialNote}
 
 ${stepForm('precheck', '① 사전점검', '위 상태를 다시 읽어 결과를 기록합니다. DB write·HIRA 호출 없음.', true)}
 
-${stepForm('dryrun', '② Readiness Dry-run 3건',
-  'HIRA 목록(getHospBasisList)만 호출해 요양병원 3곳을 확보하고 기본 정규화·ykiho 중복·필수필드·Preview DB 안전 게이트를 확인합니다. 상세 6종·평가 API 는 호출하지 않습니다. DB write 0. ① 조건이 모두 충족돼야 활성화됩니다.',
-  avail.dryrun)}
+${stepForm('ready', '② 적재 승인 (실행 준비 확인)',
+  'Preview DB 목적지·001 스키마·hospital_module=false·HOSPITAL=0·HOSPITAL_INGEST_PERSIST=1 을 다시 확인하고, 성공하면 ③ 실행 허가(5분 만료)를 발급합니다. HIRA 호출 없음, DB 쓰기 없음.',
+  avail.ready)}
 
 ${stepForm('ingest', '③ 최초 적재 3건',
-  'HIRA 목록+상세+평가를 1회 전체 수집한 뒤, 재수집 없이 그 결과를 Preview DB 에 그대로 적재합니다. 기본시설이 정확히 3건이 아니면 적재를 시작하지 않습니다. 최근 5분 내 ② Readiness 성공 + HOSPITAL=0 + 확인문구가 필요합니다.',
+  'HIRA 목록(getHospBasisList)+상세+평가를 이 단계에서 처음이자 유일하게 1회 전체 수집한 뒤, 재수집 없이 그 결과를 Preview DB 에 그대로 적재합니다. 기본시설이 정확히 3건이 아니면 적재를 시작하지 않습니다. 최근 5분 내 ② 승인 + HOSPITAL=0 + 확인문구가 필요합니다.',
   avail.ingest && drReady,
   {
     confirm: avail.ingest && drReady,
     gated: avail.ingest && drReady,
     note: !avail.ingest ? '차단: ① 조건 미충족 또는 HOSPITAL≠0'
-      : !drReady ? '차단: 최근 5분 내 ② Readiness Dry-run 성공 기록이 없습니다. ② 를 먼저 실행하세요.' : '',
+      : !drReady ? '차단: 최근 5분 내 ② 적재 승인 기록이 없습니다. ② 를 먼저 실행하세요.' : '',
   })}
 
 ${stepForm('idempotency', '④ 멱등성 재실행',
@@ -557,43 +559,26 @@ export function createHandler(deps = {}) {
 
     if (avail.hardBlock) { blocked(`hard_block:${state.guardReason}`, publicState(state)); return; }
 
-    if (step === 'dryrun') {
-      if (!avail.dryrun) { blocked('state_not_clean', publicState(state)); return; }
-      let r;
-      try { r = await runIngest({ dryRun: true }); }
-      catch { blocked('dryrun_error'); return; }
-      if (r.status !== 200 || !r.body || r.body.ok !== true) {
-        const b = (r && r.body) || {};
-        const ec = typeof b.error === 'string' ? b.error : null;
-        blocked(ec || 'dryrun_failed', {
-          http: r.status,
-          errorCode: ec,
-          reason: typeof b.reason === 'string' ? b.reason : null,
-          attempts: intOrNull(b.attempts),
-        });
-        return;
-      }
-      const st = r.body.stats || {};
-      const normalizedN = Number.isFinite(st.normalized) ? st.normalized : null;
-      const dedupedN = Number.isFinite(st.deduped) ? st.deduped : null;
-      const detail = {
-        http: r.status,
-        mode: typeof r.body.mode === 'string' ? r.body.mode : null, // 'readiness'
-        dbWrites: r.body.dbWrites === 0 ? 0 : r.body.dbWrites,
-        deduped: dedupedN,
-        normalized: normalizedN,
-        listApiCalls: Number.isFinite(st.apiCalls) ? st.apiCalls : null, // readiness 면 목록 호출 수
-        listRetries: Number.isFinite(st.listRetries) ? st.listRetries : null,
-        warnings: Array.isArray(r.body.warnings) ? r.body.warnings.length : 0,
-        failures: Array.isArray(r.body.failures) ? r.body.failures.length : 0,
-      };
-      // readiness 도 "정확히 REQUIRED_LIMIT 건 확보" 여야 진행 토큰(ic_dr)을 준다.
-      if (normalizedN !== REQUIRED_LIMIT) {
-        blocked('readiness_incomplete', detail);
-        return;
-      }
+    if (step === 'ready') {
+      // ② 적재 승인 — HIRA 호출 0, DB write 0. DB 상태 게이트만 재확인하고
+      //   짧은 만료의 서명된 ③ 실행 허가(__Host-ic_dr)만 발급한다.
+      if (!avail.ready) { blocked('state_not_clean', publicState(state)); return; }
       done(
-        { t: tNow, step, ok: true, code: 'ok', detail },
+        {
+          t: tNow, step, ok: true, code: 'ok',
+          detail: {
+            hiraCalls: 0,
+            dbWrites: 0,
+            destOk: state.destOk,
+            guardOk: state.guardOk,
+            guardReason: state.guardReason,
+            schemaOk: state.schemaOk,
+            persistEnabled: state.persistEnabled,
+            hospitalModule: state.hospitalModule,
+            ltcCount: state.ltcCount,
+            hospitalCount: state.hospitalCount,
+          },
+        },
         [setCookie(C_DR, mintToken(secret, 'dryrun', tNow), Math.floor(DR_TTL_MS / 1000))]
       );
       return;
@@ -601,7 +586,7 @@ export function createHandler(deps = {}) {
 
     if (step === 'ingest') {
       if (!avail.ingest || state.hospitalCount !== 0) { blocked('hospital_not_zero', publicState(state)); return; }
-      if (!drReady) { blocked('need_dryrun'); return; }
+      if (!drReady) { blocked('need_approval'); return; }
       if (!confirmOk) { blocked('need_confirm'); return; }
 
       let r;
@@ -644,7 +629,7 @@ export function createHandler(deps = {}) {
             hospitalCountAfter: after.hospitalCount,
           },
         },
-        [clearCookie(C_DR)] // dry-run 토큰은 1회용
+        [clearCookie(C_DR)] // ② 승인 토큰은 1회용
       );
       return;
     }
