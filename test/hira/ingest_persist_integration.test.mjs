@@ -177,14 +177,34 @@ test('통합: 2차 수집 목록 throw 3회 → 502 ingest_failed(list_fetch_fai
   assert.equal(/serviceKey|apis\.data\.go\.kr|https?:\/\/|JDQ4/.test(blob), false);
 });
 
-test('통합: 2차 수집 목록 throw 1회 후 회복 → 정상 적재 new=3, listRetries 1', async () => {
+test('통합: 목록 회복은 client 계층에서 (첫 fetch 503 → 두 번째 200) → 정상 적재 new=3', async () => {
+  const LIST_JSON = JSON.stringify({
+    response: { header: { resultCode: '00' }, body: {
+      totalCount: 3, numOfRows: 100, pageNo: 1,
+      items: { item: [1, 2, 3].map((i) => ({ ykiho: `YKIHO_INTEG_${i}`, yadmNm: `H${i}`, clCd: 28, addr: 'x', XPos: '127.0', YPos: '37.5', estbDd: 20100101 })) },
+    } },
+  });
+  const EMPTY_OK = JSON.stringify({ response: { header: { resultCode: '00' }, body: { items: '', totalCount: 0 } } });
+  let listCall = 0;
+  const ff = async (url) => {
+    if (/hospInfoServicev2/.test(url)) {
+      listCall += 1;
+      if (listCall === 1) return { status: 503, text: async () => 'busy' };
+      return { status: 200, text: async () => LIST_JSON };
+    }
+    return { status: 200, text: async () => EMPTY_OK };
+  };
+  const createClient = (o) => createHiraClient({ ...o, key: 'k', fetchImpl: ff, sleepImpl: async () => {}, minIntervalMs: 0, maxRetries: 3 });
   const sb = makeMockSb();
   const res = mkRes();
-  await createHandler(realDeps(sb, { listTotal: 3, listThrowFirst: 1, listThrowReason: 'timeout' }))(
-    mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+  await createHandler({
+    env: env(), createClient, collect: collectHospitals, persist: persistCollected,
+    sbImpl: sb, assertDb: async () => ({ ok: true }),
+  })(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.persisted.new, 3);
-  assert.equal(res.body.listRetries, 1);
+  assert.equal(listCall, 2); // client 가 1회 재시도 후 회복
   assert.equal(sb.tables.facilities.filter((f) => f.domain === 'HOSPITAL').length, 3);
 });
 

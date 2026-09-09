@@ -964,7 +964,7 @@ test('통합 ③ 재시험 재현: 2차 수집 목록 throw 3회 → flash 실�
   assert.equal(/serviceKey|supabase\.co|apis\.data\.go\.kr|JDQ4[A-Za-z0-9+/]{12}/.test(blob), false);
 });
 
-test('통합 ③: 2차 수집 목록 throw 1회 후 회복 → flash ok, new 3, listRetries 1', async () => {
+test('통합 ③: 2차 수집 목록 throw (client 소진) → collect 재재시도 없이 flash 실패, 시설 0', async () => {
   const sb = makeMockSb();
   const h = createHandler({ env: baseEnv(), sb, runIngest: realRunIngest(sb, { listTotal: 3, listThrowFirst: 1 }) });
   const { post } = await getThenPost(h, {
@@ -972,10 +972,9 @@ test('통합 ③: 2차 수집 목록 throw 1회 후 회복 → flash ok, new 3, 
     extraCookies: { '__Host-ic_dr': mintToken(SECRET, 'dryrun') },
   });
   const fl = flashOf(post);
-  assert.equal(fl.ok, true);
-  assert.equal(fl.detail.persisted.new, 3);
-  assert.equal(fl.detail.listRetries, 1);
-  assert.equal(sb.tables.facilities.filter((f) => f.domain === 'HOSPITAL').length, 3);
+  assert.equal(fl.ok, false);
+  assert.equal(fl.detail.reason, 'list_fetch_failed');
+  assert.equal(sb.tables.facilities.length, 0);
 });
 
 test('통합: control flash detail 에 ykiho·raw·URL·키 없음 (익명 숫자만)', async () => {

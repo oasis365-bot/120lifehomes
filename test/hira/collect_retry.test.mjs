@@ -104,7 +104,7 @@ test('목록 throw → collect 재시도 없음 (단일 계층), 즉시 HiraErro
   const { e, sleeps } = await run(makeMockClient({ listTotal: 3, listThrowFirst: 1, listThrowReason: 'gateway' }));
   assert.ok(e instanceof HiraError, `throw 안 함: ${e}`);
   assert.equal(e.reason, 'list_fetch_failed');
-  assert.equal(e.attempts, 1);            // collect 재시도 0 (client 내부 재시도는 client 몫)
+  assert.equal(e.attempts, 3);            // client 내부 재시도 횟수를 surface (collect 재시도는 0)
   assert.equal(e.op, 'getHospBasisList');
   assert.equal(sleeps.length, 0);         // collect 레벨 backoff 없음
   const blob = JSON.stringify({ m: e.message, reason: e.reason, op: e.op });
