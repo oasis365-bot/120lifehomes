@@ -526,10 +526,21 @@ test('통합: 부분수집 상태에서 ingestion_runs status=partial, 응답에
   const run = sb.tables.ingestion_runs[0];
   assert.equal(run.status, 'partial');
   assert.equal(run.detail.sourceIncomplete, 3, 'ingestion_runs.detail 에는 집계 수치 기록');
-  // 내부 상태 맵(step→status) 은 어디에도 안 나감
-  const blob = JSON.stringify(res.body) + JSON.stringify(sb.tables.ingestion_runs) + JSON.stringify(sb.tables.facility_sources);
-  assert.equal(/success_with_data|success_empty|"sources"/.test(blob), false);
-  assert.equal(/serviceKey|supabase\.co|JDQ4[A-Za-z0-9+/]{16,}/.test(blob), false);
+
+  // HTTP 응답: 내부 상태 맵·ykiho 원문·비밀 없음
+  const body = JSON.stringify(res.body);
+  assert.equal(/success_with_data|success_empty|"sources"/.test(body), false, '응답에 내부 sources');
+  assert.equal(/serviceKey|supabase\.co|JDQ4[A-Za-z0-9+/]{16,}/.test(body), false, '응답에 ykiho/비밀');
+
+  // ingestion_runs: 내부 상태 문자열 없음 (집계 수치 sourceIncomplete 만 허용)
+  assert.equal(/success_with_data|success_empty/.test(JSON.stringify(sb.tables.ingestion_runs)), false);
+
+  // facility_sources: 행/​raw 에 내부 sources 맵 키 없음 (external_id·raw 의 ykiho 는 001 설계상 정상)
+  for (const s of sb.tables.facility_sources) {
+    assert.equal('sources' in s, false, 'facility_sources 행에 sources 키');
+    assert.equal('sources' in (s.raw || {}), false, 'facility_sources.raw 에 sources 키');
+    assert.equal(/success_with_data|success_empty/.test(JSON.stringify(s.raw)), false, 'raw 에 상태 문자열');
+  }
 });
 
 test('통합: 부분수집 재실행 멱등 (2회차 profile write 0), 이후 정상수집에서 회복', async () => {

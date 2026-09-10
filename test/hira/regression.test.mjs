@@ -81,17 +81,23 @@ test('1B-4A: profileDiff 는 source-aware — blanket forward-fill(값 비었으
   assert.equal(/!\s*next\[k\]\s*\)\s*continue/.test(src), false, '0/false 를 빈 값 취급');
 });
 
-test('1B-4A: 내부 sources 상태는 저장·응답 경로에 문자열로 들어가지 않음 (정적 스캔)', () => {
-  for (const f of ['collect.js', 'persist.js']) {
-    const src = read(`lib/hira/${f}`);
-    // rawBundle / facility_sources body / 응답 객체에 sources 를 넣는 코드가 없어야 함
-    assert.equal(/raw:\s*\{[^}]*sources/.test(src), false, `${f}: raw 에 sources`);
-    assert.equal(/rawBundle[^;]*sources/.test(src), false, `${f}: rawBundle 에 sources`);
-  }
-  // collect 의 rawBundle 필드 목록에 sources 없음
+test('1B-4A: 내부 sources 는 rawBundle·facility_sources 저장 body 의 "키"로 들어가지 않음 (정적)', () => {
+  // "sources:" 를 객체 키로 쓰는 위치를 검사 (facility_sources 같은 식별자 부분일치는 제외)
+  const keyRe = /(^|[^_A-Za-z0-9])sources\s*:/;
+
+  // collect: rawBundle 객체 정의에 sources 키 없음
   const c = read('lib/hira/collect.js');
-  const rawBlock = c.slice(c.indexOf('const rawBundle'), c.indexOf('const rawBundle') + 400);
-  assert.equal(rawBlock.includes('sources'), false, 'rawBundle 정의에 sources 포함됨');
+  const defStart = c.indexOf('const rawBundle = {');
+  assert.ok(defStart > 0, 'rawBundle 정의를 못 찾음');
+  const rawDef = c.slice(defStart, c.indexOf('};', defStart) + 2);
+  assert.equal(keyRe.test(rawDef), false, 'rawBundle 정의에 sources: 키');
+
+  // persist: facility_sources 저장 body 에 sources 키 없음
+  const p = read('lib/hira/persist.js');
+  const at = p.indexOf("sb('facility_sources");
+  assert.ok(at > 0);
+  const fsBody = p.slice(p.indexOf('body: [{', at), p.indexOf('}]', at) + 2);
+  assert.equal(keyRe.test(fsBody), false, 'facility_sources body 에 sources: 키');
 });
 
 test('1B-4A: 기존 LTC 파일 무변경 (이 브랜치는 lib/hira + api/hospital 만 건드림)', () => {
