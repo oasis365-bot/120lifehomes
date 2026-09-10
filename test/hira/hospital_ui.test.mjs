@@ -491,7 +491,9 @@ test('상세 컨트롤러: flag=true 정상/없음/오류', async () => {
   assert.equal(els.body.hidden, false);
   assert.ok(els.body.textContent.includes('정상요양병원'));
   const back = els.body.querySelectorAll('A').find((a) => (a.getAttribute('href') || '').indexOf('hospital.html') === 0);
-  assert.equal(back.getAttribute('href'), 'hospital.html?sido=서울특별시&page=2');
+  const bsp0 = new URLSearchParams(back.getAttribute('href').split('?')[1]);
+  assert.equal(bsp0.get('sido'), '서울특별시');
+  assert.equal(bsp0.get('page'), '2');
 
   // 없음 (200 이지만 facility 없음)
   ({ doc, root, els } = makeDetailRoot());
