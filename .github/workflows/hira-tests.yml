@@ -4,17 +4,17 @@
 #  · 빌드·배포·환경변수에 영향 없음 (테스트만).
 #
 #  트리거:
-#   · push  → main, feature/**  (모든 feature 브랜치)
+#   · push  → main, feature/**, fix/**  (모든 feature·fix 브랜치)
 #   · pull_request → base 가 main 인 모든 PR
 #   · 수동 (workflow_dispatch)
 #  중복 방지: concurrency group 을 브랜치명으로 정규화(head_ref || ref_name).
-#   → feature 브랜치에 push + 그 브랜치의 PR 이 동시에 트리거돼도 같은 group 이라
+#   → feature/fix 브랜치에 push + 그 브랜치의 PR 이 동시에 트리거돼도 같은 group 이라
 #     먼저 뜬 run 이 취소되고 최신 run 하나만 남는다. main push 는 group 'main' 로 독립.
 name: hira-tests
 
 on:
   push:
-    branches: ['main', 'feature/**']
+    branches: ['main', 'feature/**', 'fix/**']
   pull_request:
     branches: ['main']
   workflow_dispatch:
