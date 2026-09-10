@@ -36,8 +36,10 @@ export function makeMockSb(seed = {}) {
     const filters = [];
     for (const part of qs.split('&').filter(Boolean)) {
       const eq = part.indexOf('=');
-      const k = decodeURIComponent(part.slice(0, eq));
-      const v = decodeURIComponent(part.slice(eq + 1));
+      // URL 쿼리 디코딩: '+' → 공백 (application/x-www-form-urlencoded, PostgREST 동일),
+      //  그 뒤 percent-decode ('%2B' 는 이 시점에 아직 '%2B' 라 '+' 로 남는다).
+      const k = decodeURIComponent(part.slice(0, eq).replace(/\+/g, ' '));
+      const v = decodeURIComponent(part.slice(eq + 1).replace(/\+/g, ' '));
       if (['select', 'limit', 'offset', 'order', 'on_conflict'].includes(k)) params[k] = v;
       else if (k === 'or') filters.push({ col: 'or', op: 'or', val: v });
       else {
@@ -75,7 +77,7 @@ export function makeMockSb(seed = {}) {
   async function sb(path, opt = {}) {
     const method = (opt.method || 'GET').toUpperCase();
     const { table, params, filters } = parse(path);
-    calls.push({ method, table, filters, body: opt.body, prefer: opt.prefer });
+    calls.push({ method, table, path, params, filters, body: opt.body, prefer: opt.prefer });
     if (!tables[table]) tables[table] = [];
     const rows = tables[table];
 

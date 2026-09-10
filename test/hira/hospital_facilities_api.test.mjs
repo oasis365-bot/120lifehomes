@@ -438,3 +438,168 @@ test('정적: specialties/grade/bed 필터는 이번 단계에서 미구현 (주
   const src = read('api/hospital/facilities.js');
   assert.ok(/specialties.*grade.*bed|bed.*필터|후속 필터/.test(src));
 });
+
+// ── 1B-4C 보안: q/sido/sigungu 가 URL·PostgREST 구조를 못 바꾼다 ──────────
+// 공격 입력: URL 구조 문자(& = ? #), PostgREST 구조 문자(( ) , ' " \ . *), SQL 와일드카드(%)
+const ATTACKS = [
+  '서울&domain=eq.LTC',
+  '서울?limit=1000',
+  '서울#fragment',
+  '서울=eq.HOSPITAL',
+  "서울'",
+  '서울,주소',
+  '서울(테스트)',
+  '서울%',        // ?p=서울%25 → 디코드되면 '서울%'
+  '서울*',
+  '서울\\"',      // 역슬래시 + 쌍따옴표
+  '서울 강남',     // 한글 + 공백 정상값
+];
+
+const FACILITY_SELECT_COLS = [
+  'id', 'name', 'address', 'sido', 'sigungu', 'sigungu_nm', 'dong_nm', 'phone', 'lat', 'lng', 'established_at',
+].join(',');
+
+// facilities 쿼리 문자열이 구조적으로 안전한지 검증
+function assertSafeFacilitiesQuery(path, allowedKeys) {
+  assert.ok(path.startsWith('facilities?'), `facilities 쿼리 아님: ${path}`);
+  assert.equal(path.includes('#'), false, `경로에 프래그먼트(#): ${path}`);
+  const qs = path.slice('facilities?'.length);
+  const entries = [...new URLSearchParams(qs)]; // [ [k,v], ... ] — & 로 나뉜 실제 파라미터
+
+  // 1) 파라미터 키가 화이트리스트뿐 — 사용자가 새 파라미터를 만들 수 없다
+  for (const [k] of entries) {
+    assert.ok(allowedKeys.includes(k), `예상 못한 쿼리 파라미터 "${k}" (${path})`);
+  }
+  // 2) 각 구조 파라미터는 정확히 1번, 코드 고정값 그대로 (덮어쓰기·중복 불가)
+  const only = (k) => entries.filter(([kk]) => kk === k).map(([, v]) => v);
+  assert.deepEqual(only('domain'), ['eq.HOSPITAL'], `domain 오염: ${path}`);
+  assert.deepEqual(only('order'), ['name.asc,id.asc'], `order 오염: ${path}`);
+  assert.deepEqual(only('select'), [FACILITY_SELECT_COLS], `select 오염: ${path}`);
+  assert.equal(only('limit').length, 1);
+  assert.equal(only('offset').length, 1);
+  assert.match(only('limit')[0], /^[0-9]+$/);
+  assert.ok(Number(only('limit')[0]) <= 50, `limit > 50: ${path}`);
+  assert.match(only('offset')[0], /^[0-9]+$/);
+
+  // 3) or 파라미터가 있으면 정확히 1개, 우리가 만든 (name.ilike.*..*,address.ilike.*..*) 형태.
+  //    사용자 값에 콤마·괄호가 없어 조건이 정확히 2개다 (3번째 조건 주입 불가).
+  const ors = only('or');
+  if (ors.length) {
+    assert.equal(ors.length, 1, `or 중복: ${path}`);
+    const inner = ors[0].replace(/^\(/, '').replace(/\)$/, '');
+    const conds = inner.split(',');
+    assert.equal(conds.length, 2, `or 조건이 2개가 아님(주입?): ${ors[0]}`);
+    for (const c of conds) assert.match(c, /^(name|address)\.ilike\.\*[^,()]*\*$/, `or 조건 구조 오염: ${c}`);
+  }
+
+  // 4) sido/sigungu_nm 필터가 있으면 정확히 1개, eq. 접두 (콤마·괄호로 다른 절 못 붙임)
+  for (const rk of ['sido', 'sigungu_nm']) {
+    const vs = only(rk);
+    if (vs.length) {
+      assert.equal(vs.length, 1, `${rk} 중복: ${path}`);
+      assert.match(vs[0], /^eq\.[^,()&=?#]*$/, `${rk} 값 구조 오염: ${vs[0]}`);
+    }
+  }
+}
+
+for (const param of ['q', 'sido', 'sigungu']) {
+  for (const attack of ATTACKS) {
+    test(`보안: ${param} = ${JSON.stringify(attack)} → 구조 불변 or 400`, async () => {
+      const sb = seededSb();
+      const res = mkRes();
+      // eslint-disable-next-line no-await-in-loop
+      await H({ sb })(mkReq({ query: { [param]: attack } }), res);
+
+      if (res.statusCode === 400) {
+        assert.equal(sb.calls.length, 0, `400 인데 병원 테이블 조회함: ${param}=${attack}`);
+        return;
+      }
+      assert.equal(res.statusCode, 200, `${param}=${attack} → ${res.statusCode}`);
+      // 200 이면: facilities 쿼리가 구조적으로 안전 + LTC 혼입 0
+      const allowed = param === 'q'
+        ? ['select', 'domain', 'or', 'order', 'offset', 'limit']
+        : ['select', 'domain', param === 'sido' ? 'sido' : 'sigungu_nm', 'order', 'offset', 'limit'];
+      const facCall = sb.calls.find((c) => c.table === 'facilities');
+      assertSafeFacilitiesQuery(facCall.path, allowed);
+      assert.ok(res.body.items.every((it) => /^H-/.test(it.facility.id)), 'LTC 혼입');
+      // domain 필터가 파싱 단계에서도 정확히 HOSPITAL
+      assert.ok(facCall.filters.some((f) => f.col === 'domain' && f.op === 'eq' && f.val === 'HOSPITAL'));
+      assert.equal(facCall.filters.some((f) => f.col === 'domain' && f.val === 'LTC'), false);
+    });
+  }
+}
+
+test('보안: sido/sigungu 정상 한글 지역명은 회귀 없이 그대로 매칭', async () => {
+  let sb = seededSb();
+  let res = mkRes();
+  await H({ sb })(mkReq({ query: { sido: '서울특별시' } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.items.map((it) => it.facility.id).sort(), ['H-h1', 'H-h2', 'H-h5']);
+
+  sb = seededSb(); res = mkRes();
+  await H({ sb })(mkReq({ query: { sigungu: '성남시 분당구' } }), res); // 공백 포함 지역명
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.items.map((it) => it.facility.id), ['H-h3']);
+});
+
+test('보안: 정상 한글 기관명·주소 검색 회귀 없음', async () => {
+  let sb = seededSb();
+  let res = mkRes();
+  await H({ sb })(mkReq({ query: { q: '요양병원' } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.total, 5); // 5곳 모두 name 에 '요양병원'
+
+  sb = seededSb(); res = mkRes();
+  await H({ sb })(mkReq({ query: { q: '테헤란로' } }), res); // address 에만 존재
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.items.map((it) => it.facility.id), ['H-h1']);
+});
+
+test('보안: q 가 정제 후 빈 문자열이 되면 전체 목록으로 조용히 바뀌지 않고 400', async () => {
+  for (const junk of ['***', '(),.', '%%%', '"\\', '...']) {
+    const sb = seededSb();
+    const res = mkRes();
+    // eslint-disable-next-line no-await-in-loop
+    await H({ sb })(mkReq({ query: { q: junk } }), res);
+    assert.equal(res.statusCode, 400, `q=${JSON.stringify(junk)} → ${res.statusCode}`);
+    assert.equal(sb.calls.length, 0);
+  }
+  // 반면 명시적 빈 문자열 q='' 는 "미지정" 계약 → 전체 목록
+  const sb = seededSb();
+  const res = mkRes();
+  await H({ sb })(mkReq({ query: { q: '' } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.total, 5);
+  const facCall = sb.calls.find((c) => c.table === 'facilities');
+  assert.equal(facCall.filters.some((f) => f.col === 'or'), false); // or 필터 없음
+});
+
+test('보안: order/limit/offset/select/domain 파라미터를 사용자가 보내도 무시된다', async () => {
+  const sb = seededSb();
+  const res = mkRes();
+  await H({ sb })(mkReq({
+    query: {
+      order: 'established_at.desc', limit: '9999', offset: '5', select: '*',
+      domain: 'LTC', or: '(name.ilike.*x*)',
+    },
+  }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.total, 5);
+  assert.equal(res.body.size, 20); // limit=9999 무시
+  assert.deepEqual(res.body.items.map((it) => it.facility.id), ['H-h1', 'H-h2', 'H-h3', 'H-h4', 'H-h5']); // 기본 정렬 유지
+  const facCall = sb.calls.find((c) => c.table === 'facilities');
+  assertSafeFacilitiesQuery(facCall.path, ['select', 'domain', 'order', 'offset', 'limit']);
+  assert.equal(facCall.path.includes('LTC'), false);
+});
+
+test('정적: 모든 사용자 값이 URLSearchParams 를 거쳐 인코딩된다 (문자열 직접 연결 없음)', () => {
+  const src = read('api/hospital/facilities.js');
+  // sido/sigungu/or 를 URLSearchParams 인스턴스에 append 한다
+  assert.ok(/new URLSearchParams\(\)/.test(src));
+  assert.ok(/p\.append\('sido', `eq\.\$\{sidoR\.value\}`\)/.test(src));
+  assert.ok(/p\.append\('or', `\(name\.ilike/.test(src));
+  // 원문 sb 경로에 사용자 값을 백틱으로 직접 이어붙이지 않는다 (facilities 조회)
+  assert.equal(/sb\(`facilities\?[^`]*\$\{(sidoR|sigunguR|qTerm|query\.)/.test(src), false);
+  // domain 은 코드 상수
+  assert.ok(src.includes("p.append('domain', 'eq.HOSPITAL')"));
+});

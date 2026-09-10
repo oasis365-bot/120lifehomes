@@ -49,8 +49,10 @@ const REGION_MAX = 60;
 const DIGITS_RE = /^[0-9]+$/;
 const CTRL_RE = /[\u0000-\u001f\u007f]/; // 제어문자
 
-// PostgREST 필터/or 표현식 삽입 차단: 기존 api/facilities.js 의 [%,()*] 를
-//  or 그룹(콤마·괄호·점·콜론·따옴표·역슬래시)까지 커버하도록 확장.
+// q 정제 — 2단계 방어 중 1단계(PostgREST 논리트리 문법 차단).
+//  기존 api/facilities.js 의 [%,()*] 제거를 or 그룹 breakout 문자(콤마·괄호·점·콜론·
+//  따옴표·역슬래시)까지 확장. 2단계(URL 구조 문자 %26/%3D/%3F/%23 …)는 값을
+//  URLSearchParams 에 넣을 때 자동 적용된다 (아래 handler 참고).
 const stripFilterChars = (s) => String(s).replace(/[%,()*.:"\\]/g, '').replace(/\s+/g, ' ').trim();
 
 const pick = (row, keys) => {
@@ -59,13 +61,20 @@ const pick = (row, keys) => {
   return out;
 };
 
-// sido / sigungu 값 검증 (정확 일치용). 반환: null(없음) | {value} | {bad:true}
+// sido / sigungu 는 "정확 일치" 파라미터 — 실제 지역명은 문자·숫자·공백·하이픈뿐이다.
+//  그 밖의 문자(& = ? # ( ) , * % " \ . : 등)가 들어오면 정상 지역명이 아니므로 400 으로 거부.
+//  (eq 필터 + URLSearchParams 인코딩만으로도 구조 주입은 불가능하지만, 위험 입력을
+//   명시적으로 거부해 계약을 분명히 한다.)
+const REGION_RE = /^[\p{L}\p{N} \-]+$/u; // 문자·숫자·공백·하이픈만
+
+// 반환: null(없음) | {value} | {bad:true}
 function parseRegion(raw) {
   if (raw === undefined || raw === null) return null;
   if (typeof raw !== 'string') return { bad: true };
-  if (raw.length > REGION_MAX || CTRL_RE.test(raw)) return { bad: true };
   const v = raw.trim();
-  return v ? { value: v } : null;
+  if (v === '') return null; // 빈 값 = 미지정
+  if (v.length > REGION_MAX || CTRL_RE.test(v) || !REGION_RE.test(v)) return { bad: true };
+  return { value: v };
 }
 
 /**
@@ -106,13 +115,19 @@ export function createHandler(deps = {}) {
       if (size > MAX_SIZE) size = MAX_SIZE; // 최대 50 로 클램프
     }
 
+    // q 계약: 미지정(또는 빈 문자열) → 필터 없음(전체 목록). 값이 있는데 정제 후
+    //  검색 가능한 내용이 0 이면 → 400 (조용히 전체 목록으로 바뀌지 않게 고정).
     let qTerm = '';
     if (query.q !== undefined) {
       if (typeof query.q !== 'string' || query.q.length > Q_MAX || CTRL_RE.test(query.q)) {
         res.status(400).json({ error: 'invalid_q' });
         return;
       }
-      qTerm = stripFilterChars(query.q); // 전부 제거되면 q 필터 미적용 (기존 api/facilities.js 와 동일)
+      qTerm = stripFilterChars(query.q);
+      if (query.q.trim() !== '' && qTerm === '') {
+        res.status(400).json({ error: 'invalid_q' });
+        return;
+      }
     }
 
     const sidoR = parseRegion(query.sido);
@@ -134,10 +149,15 @@ export function createHandler(deps = {}) {
       return;
     }
 
-    // ── 1) facilities page 조회 (domain=HOSPITAL 강제, 안정 정렬, count=exact) ──
+    // ── 1) facilities page 조회 ──
+    //  select / domain / order / offset / limit / or 구조는 전부 코드 고정이다.
+    //  사용자 입력은 sido·sigungu·q(정제된 qTerm) 의 "값" 으로만, 그것도 URLSearchParams
+    //  를 거쳐 들어간다 → & = ? # ( ) , " \ % 등이 전부 percent-encoding 되므로
+    //  사용자가 새 쿼리 파라미터를 만들거나 위 구조를 덮어쓸 수 없다.
+    //  (page/size 는 위에서 /^[0-9]+$/ 로 검증된 정수라 offset/limit 에 안전.)
     const p = new URLSearchParams();
     p.set('select', FACILITY_PUBLIC.join(','));
-    p.append('domain', 'eq.HOSPITAL');
+    p.append('domain', 'eq.HOSPITAL'); // 코드 고정 — query.domain 은 읽지 않는다.
     if (sidoR && sidoR.value) p.append('sido', `eq.${sidoR.value}`);
     // 병원 행은 facilities.sigungu 가 비어 있고 sigungu_nm 만 채워진다 → 정확 일치는 sigungu_nm 대상.
     if (sigunguR && sigunguR.value) p.append('sigungu_nm', `eq.${sigunguR.value}`);
