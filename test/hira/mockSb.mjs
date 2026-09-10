@@ -1,6 +1,7 @@
 // 인메모리 PostgREST 흉내 — persist.js 테스트용. 실제 DB 없음.
 //
-//  지원: GET(?col=eq.val, ?col=is.null, select 무시, limit, order=col.dir(다중키), prefer:count=exact)
+//  지원: GET(?col=eq.val, ?col=is.null, ?col=in.("a","b"), ?or=(col.ilike.*kw*,...),
+//            select 무시, limit, offset, order=col.dir(다중키), prefer:count=exact)
 //        POST(body 배열, on_conflict=merge-duplicates, prefer:return=representation, 유니크 위반 → 409 throw)
 //        PATCH(body 객체, 필터 매칭 행 병합)
 
@@ -37,7 +38,8 @@ export function makeMockSb(seed = {}) {
       const eq = part.indexOf('=');
       const k = decodeURIComponent(part.slice(0, eq));
       const v = decodeURIComponent(part.slice(eq + 1));
-      if (['select', 'limit', 'order', 'on_conflict'].includes(k)) params[k] = v;
+      if (['select', 'limit', 'offset', 'order', 'on_conflict'].includes(k)) params[k] = v;
+      else if (k === 'or') filters.push({ col: 'or', op: 'or', val: v });
       else {
         const dot = v.indexOf('.');
         filters.push({ col: k, op: v.slice(0, dot), val: v.slice(dot + 1) });
@@ -48,9 +50,24 @@ export function makeMockSb(seed = {}) {
 
   function match(row, filters) {
     return filters.every((f) => {
+      if (f.op === 'or') {
+        // (col.ilike.*kw*,col2.ilike.*kw*) — ilike 만 흉내 (substring, 대소문자 무시)
+        const inner = String(f.val).replace(/^\(/, '').replace(/\)$/, '');
+        return inner.split(',').some((cond) => {
+          const m = cond.match(/^([A-Za-z_]+)\.ilike\.(.*)$/);
+          if (!m) return false;
+          const needle = m[2].replace(/\*/g, '').toLowerCase();
+          return String(row[m[1]] == null ? '' : row[m[1]]).toLowerCase().includes(needle);
+        });
+      }
       const cur = row[f.col];
       if (f.op === 'is') return f.val === 'null' ? cur === null || cur === undefined : String(cur) === f.val;
       if (f.op === 'eq') return String(cur) === f.val;
+      if (f.op === 'in') {
+        const inner = String(f.val).replace(/^\(/, '').replace(/\)$/, '');
+        const set = inner.split(',').map((x) => x.trim().replace(/^"(.*)"$/, '$1'));
+        return set.includes(String(cur));
+      }
       return false;
     });
   }
@@ -83,6 +100,7 @@ export function makeMockSb(seed = {}) {
           return 0;
         });
       }
+      if (params.offset != null) hit = hit.slice(parseInt(params.offset, 10) || 0);
       if (params.limit != null) hit = hit.slice(0, parseInt(params.limit, 10));
       return { data: hit.map((r) => ({ ...r })), count };
     }
