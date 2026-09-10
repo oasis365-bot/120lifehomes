@@ -16,6 +16,32 @@
   var PAGE_SIZE = 20;
   var NONE = '정보 없음';
 
+  // 과도한 URL / from 생성 방지용 상한 (API 계약과 동일하거나 그 이하)
+  var MAX_Q = 100;
+  var MAX_REGION = 60;
+  var MAX_PAGE = 10000;
+  var MAX_FROM = 400;
+
+  function clampStr(v, max) {
+    var s = String(v == null ? '' : v).trim();
+    return s.length > max ? s.slice(0, max) : s;
+  }
+  function clampPage(v) {
+    var n = parseInt(v, 10);
+    if (!Number.isFinite(n) || n < 1) return 1;
+    return n > MAX_PAGE ? MAX_PAGE : n;
+  }
+  // 검색 상태를 상한 안으로 정규화
+  function clampState(st) {
+    st = st || {};
+    return {
+      q: clampStr(st.q, MAX_Q),
+      sido: clampStr(st.sido, MAX_REGION),
+      sigungu: clampStr(st.sigungu, MAX_REGION),
+      page: clampPage(st.page)
+    };
+  }
+
   // ── 병상 세부 / 실 구분 라벨 (알 수 없는 키는 표시하지 않는다) ──
   var BED_LABELS = {
     standard: '일반 병상', higher: '상급 병상', isolation: '격리 병상',
@@ -87,14 +113,15 @@
     return 'hospital-facility.html?' + p.toString();
   }
 
-  // 브라우저 주소창에 반영할 검색 상태 쿼리스트링 ('' = 조건 없음)
+  // 브라우저 주소창·카드 from 에 쓸 검색 상태 쿼리스트링 ('' = 조건 없음).
+  //  값을 상한 안으로 정규화해 과도한 URL 생성을 막는다.
   function stateToSearch(state) {
-    state = state || {};
+    var st = clampState(state);
     var p = new URLSearchParams();
-    if (hasValue(state.q)) p.set('q', String(state.q).trim());
-    if (hasValue(state.sido)) p.set('sido', String(state.sido).trim());
-    if (hasValue(state.sigungu)) p.set('sigungu', String(state.sigungu).trim());
-    if ((parseInt(state.page, 10) || 1) > 1) p.set('page', String(parseInt(state.page, 10)));
+    if (st.q) p.set('q', st.q);
+    if (st.sido) p.set('sido', st.sido);
+    if (st.sigungu) p.set('sigungu', st.sigungu);
+    if (st.page > 1) p.set('page', String(st.page));
     var s = p.toString();
     return s ? '?' + s : '';
   }
@@ -341,14 +368,20 @@
 
   /* ---------------- 기능 플래그 ---------------- */
 
+  // fail-closed: 아래 모든 경우 false 를 돌려준다 —
+  //  fetchImpl 없음/동기 throw / 네트워크 오류 / non-200 / JSON 파싱 실패 /
+  //  hospital_module 키 없음 / 값이 true(boolean) 가 아님("true"·1·null 등)
   function checkHospitalFlag(fetchImpl) {
-    return fetchImpl('/api/flags').then(function (r) {
-      return r.json();
-    }).then(function (d) {
-      return !!(d && d.hospital_module === true);
-    }).catch(function () {
-      return false;
-    });
+    if (typeof fetchImpl !== 'function') return Promise.resolve(false);
+    return Promise.resolve()
+      .then(function () { return fetchImpl('/api/flags'); })
+      .then(function (r) {
+        if (!r || !r.ok) return false;
+        return r.json().then(function (d) {
+          return !!(d && d.hospital_module === true);
+        });
+      })
+      .catch(function () { return false; });
   }
 
   /* ---------------- 검색 컨트롤러 ---------------- */
@@ -425,20 +458,20 @@
 
     function readState() {
       var p = new URLSearchParams(loc.search || '');
-      return {
+      return clampState({
         q: p.get('q') || '',
         sido: p.get('sido') || '',
         sigungu: p.get('sigungu') || '',
-        page: Math.max(1, parseInt(p.get('page'), 10) || 1)
-      };
+        page: p.get('page')
+      });
     }
     function readForm() {
-      return {
-        q: elQ ? elQ.value.trim() : '',
+      return clampState({
+        q: elQ ? elQ.value : '',
         sido: elSido ? elSido.value : '',
         sigungu: elSigungu ? elSigungu.value : '',
         page: 1
-      };
+      });
     }
     function applyStateToForm() {
       if (elQ) elQ.value = state.q || '';
@@ -565,17 +598,19 @@
     var elStatus = root.querySelector('[data-h="status"]');
 
     var params = new URLSearchParams(loc.search || '');
-    var id = params.get('id') || '';
+    var id = clampStr(params.get('id') || '', 256);
     var backSearch = '';
     var rawFrom = params.get('from');
-    if (rawFrom) {
-      // from 은 우리가 만든 검색 쿼리스트링만 허용 (q/sido/sigungu/page)
-      var fp = new URLSearchParams(rawFrom);
+    if (rawFrom && String(rawFrom).length <= MAX_FROM) {
+      // from 은 우리가 만든 검색 쿼리스트링만 재구성한다 — q/sido/sigungu/page 만,
+      //  각 값은 상한 안으로. 외부 URL·"//evil" 등은 키가 아니므로 자연히 버려진다.
+      var fp = new URLSearchParams(String(rawFrom));
+      var st = clampState({ q: fp.get('q'), sido: fp.get('sido'), sigungu: fp.get('sigungu'), page: fp.get('page') });
       var clean = new URLSearchParams();
-      ['q', 'sido', 'sigungu', 'page'].forEach(function (k) {
-        var v = fp.get(k);
-        if (v != null && v !== '') clean.set(k, v);
-      });
+      if (st.q) clean.set('q', st.q);
+      if (st.sido) clean.set('sido', st.sido);
+      if (st.sigungu) clean.set('sigungu', st.sigungu);
+      if (st.page > 1) clean.set('page', String(st.page));
       var cs = clean.toString();
       if (cs) backSearch = '?' + cs;
     }

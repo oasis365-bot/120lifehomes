@@ -568,3 +568,204 @@ test('메뉴·홈 링크에 요양병원 항목을 추가하지 않았다 (Produ
   assert.equal(read('assets/js/app.js').includes('hospital.html'), false);
   assert.equal(read('index.html').includes('hospital.html'), false);
 });
+
+/* ================= 1B-4D PR 전 최종 통합점검 ================= */
+
+// 1. 검색엔진 차단
+test('통합: 두 페이지 모두 robots noindex,nofollow', () => {
+  for (const f of ['hospital.html', 'hospital-facility.html']) {
+    const h = read(f);
+    assert.match(h, /<meta\s+name="robots"\s+content="noindex,\s*nofollow">/i, `${f} robots meta`);
+  }
+});
+
+// 2. /api/flags 실패도 fail-closed — 모든 경우 병원 API 호출 0
+test('통합: checkHospitalFlag 는 모든 실패 경우에 false + 화면은 준비 중', async () => {
+  const cases = [
+    ['flag=false', () => mkRes(200, { hospital_module: false })],
+    ['network throw', () => { throw new Error('net'); }],
+    ['non-200 (JSON body)', () => mkRes(500, { hospital_module: true })],
+    ['non-200 (503)', () => mkRes(503, { error: 'x' })],
+    ['JSON 파싱 실패', () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError('bad'); } })],
+    ['hospital_module 키 없음', () => mkRes(200, { other: 1 })],
+    ['"true" 문자열', () => mkRes(200, { hospital_module: 'true' })],
+    ['1 숫자', () => mkRes(200, { hospital_module: 1 })],
+    ['null', () => mkRes(200, { hospital_module: null })],
+    ['본문 없음', () => mkRes(200, null)],
+  ];
+  for (const [label, handler] of cases) {
+    const UI = loadUI();
+    // 단위: checkHospitalFlag 직접
+    // eslint-disable-next-line no-await-in-loop
+    const on = await UI.checkHospitalFlag(async () => handler());
+    assert.equal(on, false, `checkHospitalFlag ${label} → false 여야 함`);
+
+    // 통합: initSearch 가 병원 API 를 부르지 않고 준비 중 화면
+    const { doc, root, els } = makeSearchRoot();
+    els.prep.textContent = '현재 준비 중인 서비스입니다.'; // 실제 HTML 이 제공하는 안내
+    const UI2 = loadUI(doc);
+    const f = async (url) => {
+      if (String(url).indexOf('/api/flags') >= 0) return handler();
+      throw new Error('unexpected fetch: ' + url); // 병원 API 를 부르면 테스트 실패
+    };
+    f.calls = [];
+    // eslint-disable-next-line no-await-in-loop
+    await UI2.initSearch(root, { fetch: f, history: { replaceState() {} }, location: { search: '', pathname: 'hospital.html' } });
+    assert.equal(els.prep.hidden, false, `${label} → 준비 중 표시`);
+    assert.equal(els.search.hidden, true, `${label} → 검색 UI 숨김`);
+    assert.equal(els.list.textContent, '', `${label} → 목록 안 그림`);
+    // 상태 영역에 내부 오류 흔적 없음
+    assert.equal(/Error|SyntaxError|stack|http:|api\/|supabase/i.test(els.status.textContent), false, `${label} 내부오류 노출`);
+  }
+});
+
+test('통합: hospital.html · hospital-facility.html 준비 중 안내 문구가 HTML 에 있다', () => {
+  for (const f of ['hospital.html', 'hospital-facility.html']) {
+    const h = read(f);
+    const m = h.match(/data-h="prep"[\s\S]*?<\/section>/);
+    assert.ok(m && /준비 중/.test(m[0]), `${f} prep 안내 문구`);
+  }
+});
+
+test('통합: fetchImpl 없음/비함수여도 동기 throw 없이 false', async () => {
+  const UI = loadUI();
+  assert.equal(await UI.checkHospitalFlag(undefined), false);
+  assert.equal(await UI.checkHospitalFlag(null), false);
+  assert.equal(await UI.checkHospitalFlag(123), false);
+});
+
+test('통합: 상세도 flag 실패 시 병원 API 호출 0', async () => {
+  for (const handler of [() => { throw new Error('x'); }, () => mkRes(502, {}), () => mkRes(200, { hospital_module: 'true' })]) {
+    const { doc, root, els } = makeDetailRoot();
+    const UI = loadUI(doc);
+    const f = async (url) => {
+      if (String(url).indexOf('/api/flags') >= 0) return handler();
+      throw new Error('unexpected: ' + url);
+    };
+    // eslint-disable-next-line no-await-in-loop
+    await UI.initDetail(root, { fetch: f, location: { search: '?id=H-1' } });
+    assert.equal(els.prep.hidden, false);
+    assert.equal(els.body.hidden, true);
+  }
+});
+
+// 3. app.js 재사용 side effect
+test('통합: app.js/data.js/regioncodes.js 는 fetch·XHR·전역 리스너·LTC API 를 실행하지 않는다 (정적)', () => {
+  for (const f of ['assets/js/app.js', 'assets/js/data.js', 'assets/js/regioncodes.js']) {
+    const src = read(f);
+    const codeOnly = src.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    assert.equal(/\bfetch\s*\(/.test(codeOnly), false, `${f} 에 fetch(`);
+    assert.equal(/XMLHttpRequest/.test(codeOnly), false, `${f} 에 XHR`);
+    assert.equal(/\.addEventListener\s*\(/.test(codeOnly), false, `${f} 에 addEventListener`);
+    assert.equal(/DOMContentLoaded/.test(codeOnly), false, `${f} 에 DOMContentLoaded`);
+    assert.equal(/['"`]\/api\//.test(codeOnly), false, `${f} 코드에 /api/ 경로`);
+  }
+});
+
+test('통합: app.js 로드 + mountChrome("") 는 fetch 를 부르지 않고 hospital DOM 을 건드리지 않는다', () => {
+  const APPJS = read('assets/js/app.js');
+  // #chrome-header/#chrome-footer/#hospital-search 를 가진 문서 스텁
+  const doc = makeDoc();
+  const chromeH = doc.createElement('div'); chromeH.setAttribute('id', 'chrome-header');
+  const chromeF = doc.createElement('div'); chromeF.setAttribute('id', 'chrome-footer');
+  const hs = doc.createElement('main'); hs.setAttribute('id', 'hospital-search');
+  hs.appendChild(doc.createElement('form'));
+  const byId = { 'chrome-header': chromeH, 'chrome-footer': chromeF, 'hospital-search': hs };
+  doc.getElementById = (id) => byId[id] || null;
+  doc.querySelector = () => null; // nav.main 등 없음
+  const body = doc.createElement('body');
+  doc.body = body;
+
+  let fetchCalls = 0;
+  const sandbox = {
+    window: {}, document: doc,
+    localStorage: { getItem: () => null, setItem: () => {} },
+    fetch: () => { fetchCalls += 1; return Promise.resolve(mkRes(200, {})); },
+    console: { log() {}, warn() {}, error() {} },
+  };
+  sandbox.window = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(APPJS, sandbox, { filename: 'app.js' });
+
+  const hsChildrenBefore = hs.children.length;
+  assert.equal(typeof sandbox.mountChrome, 'function', 'mountChrome 전역 정의');
+  sandbox.mountChrome(''); // hospital 페이지가 부르는 방식
+
+  assert.equal(fetchCalls, 0, 'app.js 로드/mountChrome 이 fetch 호출');
+  assert.equal(hs.children.length, hsChildrenBefore, 'mountChrome 이 #hospital-search 를 변경');
+  assert.equal(hs.getAttribute('id'), 'hospital-search', '#hospital-search id 유지');
+  assert.ok(chromeH.innerHTML && chromeH.innerHTML.length > 0, 'chrome-header 는 채워짐(정상 동작)');
+});
+
+// 4. Vercel 정적 routing + from 상한
+test('통합: 정적 파일이 존재하고 vercel.json 이 /hospital*.html 를 가로채지 않는다', () => {
+  assert.ok(read('hospital.html').length > 100);
+  assert.ok(read('hospital-facility.html').length > 100);
+  const v = JSON.parse(read('vercel.json'));
+  // rewrites/redirects/routes 로 hospital 경로를 다른 곳으로 보내지 않음
+  const json = JSON.stringify(v);
+  assert.equal(/hospital/.test(json), false, 'vercel.json 이 hospital 경로 언급');
+  for (const k of ['rewrites', 'redirects', 'routes']) {
+    if (v[k]) {
+      for (const rule of v[k]) {
+        assert.equal(/hospital/.test(JSON.stringify(rule)), false, `vercel ${k} 규칙이 hospital 건드림`);
+      }
+    }
+  }
+});
+
+test('통합: from 은 q/sido/sigungu/page 만 재구성, //evil·외부 URL 불가', async () => {
+  const attacks = [
+    'https://evil.com',
+    '//evil.com',
+    '/../../etc/passwd',
+    'q=a&redirect=https://evil.com&next=//evil',
+    'javascript:alert(1)',
+    'q=' + 'x'.repeat(800) + '&page=1',          // from 전체가 상한 초과 → 통째로 무시
+    'q=' + 'y'.repeat(200) + '&page=99999999',   // from 은 통과, 값은 클램프
+  ];
+  for (const bad of attacks) {
+    const { doc, root, els } = makeDetailRoot();
+    const UI = loadUI(doc);
+    const f = fakeFetch([
+      ['/api/flags', mkRes(200, { hospital_module: true })],
+      ['/api/hospital/facility', mkRes(200, { facility: { id: 'H-1', name: 'x', address: 'a' } })],
+    ]);
+    // eslint-disable-next-line no-await-in-loop
+    await UI.initDetail(root, { fetch: f, location: { search: '?id=H-1&from=' + encodeURIComponent(bad) } });
+    const back = els.body.querySelectorAll('A').find((a) => (a.getAttribute('href') || '').indexOf('hospital.html') === 0);
+    assert.ok(back, `back 링크 있음: ${bad.slice(0, 30)}`);
+    const href = back.getAttribute('href');
+    // 항상 hospital.html 로 시작하는 상대경로. 외부 스킴·// 로 시작 불가
+    assert.match(href, /^hospital\.html(\?|$)/, `href 형식: ${href.slice(0, 60)}`);
+    assert.equal(/^https?:|^\/\/|^javascript:|evil\.com/.test(href), false, `외부 이동 가능: ${href.slice(0, 60)}`);
+    const bsp = new URLSearchParams((href.split('?')[1] || ''));
+    for (const k of [...new Set([...bsp.keys()])]) {
+      assert.ok(['q', 'sido', 'sigungu', 'page'].includes(k), `허용 안 된 from 키 "${k}"`);
+    }
+    // 상한: q ≤ 100, page ≤ 10000
+    if (bsp.get('q')) assert.ok(bsp.get('q').length <= 100, 'from q 상한');
+    if (bsp.get('page')) assert.ok(Number(bsp.get('page')) <= 10000, 'from page 상한');
+  }
+});
+
+test('통합: 검색 상태 q/지역 길이·page 상한이 생성 URL 에 반영된다', async () => {
+  const { doc, root, els } = makeSearchRoot();
+  const UI = loadUI(doc);
+  let seen = '';
+  const f = fakeFetch([
+    ['/api/flags', mkRes(200, { hospital_module: true })],
+    ['/api/hospital/facilities', (url) => { seen = url; return mkRes(200, { items: [], page: 1, size: 20, total: 0 }); }],
+  ]);
+  const ready = {};
+  await UI.initSearch(root, {
+    fetch: f, history: { replaceState() {} },
+    location: { search: '?q=' + 'z'.repeat(400) + '&sido=' + 's'.repeat(200) + '&page=999999999', pathname: 'hospital.html' },
+    onReady: (api) => { ready.run = api.run; },
+  });
+  await new Promise((r) => setTimeout(r, 0));
+  const sp = new URLSearchParams(seen.split('?')[1]);
+  assert.ok(sp.get('q').length <= 100, 'q 100자 이하로 잘림: ' + sp.get('q').length);
+  assert.ok(sp.get('sido').length <= 60, 'sido 60자 이하');
+  assert.ok(Number(sp.get('page')) <= 10000, 'page 10000 이하: ' + sp.get('page'));
+});
