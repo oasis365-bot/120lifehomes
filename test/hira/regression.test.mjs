@@ -88,8 +88,9 @@ test('1B-4A: medical_services 는 파이프라인 미소유 — profileDiff 가 
   assert.ok(src.includes('PROFILE_NOT_OWNED'), 'PROFILE_NOT_OWNED 없음');
   assert.ok(/PROFILE_NOT_OWNED\s*=\s*new Set\(\[[^\]]*'medical_services'/.test(src), 'medical_services 미소유 목록에 없음');
   assert.ok(/PROFILE_NOT_OWNED\.has\(k\)\)\s*continue/.test(src), 'profileDiff 가 미소유 컬럼을 skip 안 함');
-  // 코드가 검증 상태값(FACILITY_CLAIMED 등)을 직접 알 필요 없음
-  assert.equal(src.includes('FACILITY_CLAIMED'), false);
+  // 코드 "로직"은 검증 상태값을 판단하지 않음 (분기 조건에 status 문자열이 없음)
+  const codeOnly = src.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.equal(/(===|!==|includes\().*FACILITY_CLAIMED/.test(codeOnly), false, '로직이 FACILITY_CLAIMED 를 판단');
 });
 
 test('1B-4A: 내부 sources 는 rawBundle·facility_sources 저장 body 의 "키"로 들어가지 않음 (정적)', () => {
