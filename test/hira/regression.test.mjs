@@ -69,16 +69,27 @@ test('1B-3B 안전: 허용 host 미지정이면 verifyPreviewDbUrl 은 fail-clos
   }
 });
 
-test('1B-4A: profileDiff 는 source-aware — blanket forward-fill(값 비었으면 무조건 skip) 아님', () => {
+test('1B-4A: profileDiff 는 source-aware — blanket forward-fill 아님 (정적)', () => {
   const src = read('lib/hira/persist.js');
-  // profileDiff 가 3번째 인자(sources)를 받고, endpoint 게이트로만 skip 한다
   assert.ok(/function profileDiff\(existing, next, sources\)/.test(src), 'profileDiff(sources) 시그니처');
-  assert.ok(src.includes('fieldSourcesOk'), 'endpoint 게이트 함수 없음');
-  assert.ok(src.includes('PROFILE_FIELD_SOURCES'), '필드→endpoint 매핑 없음');
-  // "값이 null/[]/{} 이면 skip" 같은 값 기반 blanket 조건이 없어야 함
-  assert.equal(/if\s*\(\s*(next\[k\]|value)\s*(==|===)\s*null\s*\)\s*continue/.test(src), false, 'blanket forward-fill 금지');
-  // 0/false 를 빈 값으로 취급하는 코드 없음
-  assert.equal(/!\s*next\[k\]\s*\)\s*continue/.test(src), false, '0/false 를 빈 값 취급');
+  assert.ok(src.includes('fieldSourcesOk') && src.includes('PROFILE_FIELD_SOURCES'), '게이트/매핑 없음');
+  // 빈값 skip 은 반드시 "권위 있는 없음(success_empty)이 아닐 때"와 결합돼야 함 (blanket 아님)
+  assert.ok(src.includes('anyReqStepEmpty'), 'success_empty 판별 함수 없음');
+  assert.ok(/isEmptyProfileValue\(next\[k\]\)\s*&&\s*!anyReqStepEmpty/.test(src), '빈값 skip 이 authoritative 신호와 결합 안 됨');
+  // "next[k] 가 null 이면 단독으로 skip" 은 없어야 함
+  assert.equal(/if\s*\(\s*(next\[k\]|value)\s*(==|===)\s*null\s*\)\s*continue/.test(src), false);
+  assert.equal(src.includes('!next[k])'), false, 'truthy 검사로 0/false 를 빈 값 취급');
+  // 0·false 는 유효값 (isEmptyProfileValue 가 명시적으로 number/boolean 제외)
+  assert.ok(src.includes("v === null || v === undefined || v === ''"), 'isEmptyProfileValue 명시 조건 없음');
+});
+
+test('1B-4A: medical_services 는 파이프라인 미소유 — profileDiff 가 절대 갱신하지 않음 (정적)', () => {
+  const src = read('lib/hira/persist.js');
+  assert.ok(src.includes('PROFILE_NOT_OWNED'), 'PROFILE_NOT_OWNED 없음');
+  assert.ok(/PROFILE_NOT_OWNED\s*=\s*new Set\(\[[^\]]*'medical_services'/.test(src), 'medical_services 미소유 목록에 없음');
+  assert.ok(/PROFILE_NOT_OWNED\.has\(k\)\)\s*continue/.test(src), 'profileDiff 가 미소유 컬럼을 skip 안 함');
+  // 코드가 검증 상태값(FACILITY_CLAIMED 등)을 직접 알 필요 없음
+  assert.equal(src.includes('FACILITY_CLAIMED'), false);
 });
 
 test('1B-4A: 내부 sources 는 rawBundle·facility_sources 저장 body 의 "키"로 들어가지 않음 (정적)', () => {

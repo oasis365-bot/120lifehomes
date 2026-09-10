@@ -514,6 +514,29 @@ test('통합: 진료과 endpoint 비정상 resultCode → specialties/specialist
   assert.deepEqual(sb.tables.hospital_profiles.map((p) => JSON.stringify(p.specialist_counts)), sc0);
 });
 
+test('통합: 장비 endpoint 가 resultCode 정상 + 0건(success_empty) → equipment 삭제(권위 있는 없음)', async () => {
+  const sb = makeMockSb();
+  await runIngest(sb, { listTotal: 2 }, 2);
+  assert.ok(sb.tables.hospital_profiles.every((p) => p.equipment && p.equipment.length));
+  await runIngest(sb, { listTotal: 2, emptySteps: new Set(['equipment']) }, 2);
+  for (const p of sb.tables.hospital_profiles) {
+    assert.equal(p.equipment, null, 'success_empty → equipment 삭제됨');
+    assert.ok(p.specialties.length, '다른 필드는 그대로');
+  }
+});
+
+test('통합: medical_services 는 재수집에 갱신되지 않음 (파이프라인 미소유)', async () => {
+  const sb = makeMockSb();
+  await runIngest(sb, { listTotal: 2 }, 2);
+  assert.ok(sb.tables.hospital_profiles.every((p) => JSON.stringify(p.medical_services) === '{}'));
+  sb.tables.hospital_profiles[0].medical_services = { rehab: 'FACILITY_CLAIMED' };
+  // 장비 endpoint 성공 실패 여부와 무관하게 medical_services 는 PATCH 되지 않음
+  await runIngest(sb, { listTotal: 2, emptySteps: new Set(['equipment']) }, 2);
+  assert.deepEqual(sb.tables.hospital_profiles[0].medical_services, { rehab: 'FACILITY_CLAIMED' });
+  const profPatches = sb.calls.filter((c) => c.method === 'PATCH' && c.table === 'hospital_profiles');
+  for (const p of profPatches) assert.equal('medical_services' in (p.body || {}), false);
+});
+
 test('통합: 부분수집 상태에서 ingestion_runs status=partial, 응답에 내부 sources 없음', async () => {
   const sb = makeMockSb();
   const res = mkRes();
