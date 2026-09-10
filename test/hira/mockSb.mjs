@@ -1,6 +1,6 @@
 // 인메모리 PostgREST 흉내 — persist.js 테스트용. 실제 DB 없음.
 //
-//  지원: GET(?col=eq.val, ?col=is.null, select, limit, prefer:count=exact)
+//  지원: GET(?col=eq.val, ?col=is.null, select 무시, limit, order=col.dir(다중키), prefer:count=exact)
 //        POST(body 배열, on_conflict=merge-duplicates, prefer:return=representation, 유니크 위반 → 409 throw)
 //        PATCH(body 객체, 필터 매칭 행 병합)
 
@@ -65,6 +65,24 @@ export function makeMockSb(seed = {}) {
     if (method === 'GET') {
       let hit = rows.filter((r) => match(r, filters));
       const count = /count=exact/.test(opt.prefer || '') ? hit.length : null;
+      // order=col.dir[.nullsfirst|.nullslast][,col2.dir...]  (PostgREST 흉내, 다중키)
+      if (params.order) {
+        const keys = params.order.split(',').map((seg) => {
+          const [col, dir = 'asc'] = seg.split('.');
+          return { col, desc: dir === 'desc' };
+        });
+        hit = [...hit].sort((a, b) => {
+          for (const { col, desc } of keys) {
+            const av = a[col]; const bv = b[col];
+            if (av === bv) continue;
+            if (av == null) return 1;
+            if (bv == null) return -1;
+            const cmp = av < bv ? -1 : 1;
+            return desc ? -cmp : cmp;
+          }
+          return 0;
+        });
+      }
       if (params.limit != null) hit = hit.slice(0, parseInt(params.limit, 10));
       return { data: hit.map((r) => ({ ...r })), count };
     }
