@@ -33,12 +33,23 @@ function realBundle(overrides = {}) {
   };
 }
 
+const ALL_OK_SOURCES = Object.freeze({
+  facility: 'success_with_data', detail: 'success_with_data', departments: 'success_with_data',
+  equipment: 'success_with_data', specialists: 'success_with_data', otherStaff: 'success_with_data',
+});
+
 function mkItem(overrides = {}) {
   const bundle = realBundle(overrides);
-  const hospital = normalizeHospitalRecord(bundle);
+  const hospital = { ...normalizeHospitalRecord(bundle), ...(overrides.hospital || {}) };
+  if (overrides.hash) hospital.normalized_hash = overrides.hash;
   const evalItem = overrides.evalItem === null ? null : (overrides.evalItem || first('hospAsm_withGrade.json'));
   const evaluation = normalizeEvaluationRecord({ basis: bundle.basis, evalItem });
-  return { hospital, evaluation, raw: { ...bundle, evalItem, collectedAt: '2026-09-07T00:00:00.000Z' } };
+  // collect 가 실을 sources (endpoint 상태). 지정 없으면 전부 정상.
+  const sources = overrides.sources || ALL_OK_SOURCES;
+  return {
+    hospital, evaluation, sources,
+    raw: { ...bundle, evalItem, collectedAt: '2026-09-07T00:00:00.000Z' },
+  };
 }
 
 const NOW = () => '2026-09-07T12:00:00.000Z';
@@ -153,6 +164,175 @@ test('buildFacilityRow / buildProfileRow 는 운영자 컬럼을 절대 포함�
   }
   const pr = buildProfileRow(item.hospital, item.hospital.id);
   assert.equal('created_at' in pr, false);
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// 1B-4A — source-aware: 부분응답이 기존 profile 값을 지우지 않음
+// ══════════════════════════════════════════════════════════════════════
+
+// 기존 완전 수집 1건을 저장해 두고, 특정 endpoint 만 상태를 바꿔 재수집하는 헬퍼
+async function seedThenRecollect(sb, recollectOverrides) {
+  await persistCollected([mkItem()], { sb, now: NOW });
+  const prof0 = sb.tables.hospital_profiles[0];
+  const before = JSON.parse(JSON.stringify(prof0));
+  const w0 = sb.countWrites();
+  const r = await persistCollected(
+    [mkItem({ hash: 'recollect-hash-differs', ...recollectOverrides })],
+    { sb, now: NOW },
+  );
+  return { r, before, after: sb.tables.hospital_profiles[0], newWrites: sb.countWrites() - w0 };
+}
+
+test('bed_detail 존재 + facility endpoint failed → bed_detail/bed_total/establishment_type 기존 값 유지', async () => {
+  const sb = makeMockSb();
+  const { after, before } = await seedThenRecollect(sb, {
+    hospital: { bed_detail: null, bed_total: null, establishment_type: null },
+    sources: { ...ALL_OK_SOURCES, facility: 'failed' },
+  });
+  assert.deepEqual(after.bed_detail, before.bed_detail);
+  assert.equal(after.bed_total, before.bed_total);
+  assert.equal(after.establishment_type, before.establishment_type);
+  assert.ok(before.bed_total > 0, '사전조건: 기존 값 존재');
+});
+
+test('specialties 존재 + 진료과 endpoint 비정상(unavailable) → specialties/specialist_counts 유지', async () => {
+  const sb = makeMockSb();
+  const { after, before } = await seedThenRecollect(sb, {
+    hospital: { specialties: [], specialist_counts: null },
+    sources: { ...ALL_OK_SOURCES, departments: 'failed' }, // specialist_counts 는 departments+specialists 둘 다 필요
+  });
+  assert.deepEqual(after.specialties, before.specialties);
+  assert.deepEqual(after.specialist_counts, before.specialist_counts);
+  assert.ok(before.specialties.length > 0);
+});
+
+test('equipment 존재 + 장비 endpoint failed → equipment 유지, 다른 성공 필드는 갱신', async () => {
+  const sb = makeMockSb();
+  const { after, before } = await seedThenRecollect(sb, {
+    hospital: { equipment: null, bed_total: 999 }, // equipment 는 실패, bed_total 은 성공적으로 변경
+    sources: { ...ALL_OK_SOURCES, equipment: 'failed' },
+  });
+  assert.deepEqual(after.equipment, before.equipment, 'equipment 유지');
+  assert.equal(after.bed_total, 999, 'facility 성공 → bed_total 갱신 (한 endpoint 실패가 다른 필드 갱신을 막지 않음)');
+});
+
+test('정상 성공 + authoritative empty(success_empty) → 기존 값 삭제(갱신)됨', async () => {
+  const sb = makeMockSb();
+  const { after, before } = await seedThenRecollect(sb, {
+    hospital: { equipment: null, specialties: [] },
+    // 해당 endpoint 가 "resultCode 정상 + 0건" (권위 있는 없음)
+    sources: { ...ALL_OK_SOURCES, equipment: 'success_empty', departments: 'success_empty' },
+  });
+  assert.ok(before.equipment && before.equipment.length > 0);
+  assert.equal(after.equipment, null, 'success_empty → 삭제');
+  assert.deepEqual(after.specialties, [], 'success_empty → 빈 배열로 삭제');
+});
+
+test('success_with_data 인데 optional 원본 키 누락(값 null) → 기존 값 보존 (삭제 아님)', async () => {
+  const sb = makeMockSb();
+  const { after, before } = await seedThenRecollect(sb, {
+    // getEqpInfo 는 item 을 줬지만 orgTyCdNm 이 없어 establishment_type=null 로 정규화된 상황
+    hospital: { establishment_type: null, equipment: null },
+    sources: { ...ALL_OK_SOURCES }, // 전부 success_with_data (success_empty 아님)
+  });
+  assert.equal(after.establishment_type, before.establishment_type, 'optional 키 누락 → 기존 값 유지');
+  assert.ok(before.establishment_type);
+  assert.deepEqual(after.equipment, before.equipment, 'optional 키 누락 → equipment 도 유지');
+});
+
+test('medical_services 는 파이프라인 미소유 — 운영자 FACILITY_CLAIMED 값이 재수집에 보존', async () => {
+  const sb = makeMockSb();
+  await persistCollected([mkItem()], { sb, now: NOW });
+  assert.deepEqual(sb.tables.hospital_profiles[0].medical_services, {}, '신규 행: 기본값 {}');
+  // 운영자/검증 절차가 채운 값
+  sb.tables.hospital_profiles[0].medical_services = { dialysis: 'FACILITY_CLAIMED', rehab: 'VERIFIED_TRUE' };
+  // profile 필드(bed_total)도 실제 바뀌는 재수집 → hospital_profiles PATCH 발생
+  const r = await persistCollected(
+    [mkItem({ hash: 'ms-recollect', hospital: { bed_total: 300 }, sources: { ...ALL_OK_SOURCES } })],
+    { sb, now: NOW },
+  );
+  assert.equal(r.stats.updated, 1);
+  assert.equal(sb.tables.hospital_profiles[0].bed_total, 300, 'bed_total 은 갱신');
+  assert.deepEqual(sb.tables.hospital_profiles[0].medical_services,
+    { dialysis: 'FACILITY_CLAIMED', rehab: 'VERIFIED_TRUE' }, 'medical_services 불변');
+  const patches = sb.calls.filter((c) => c.method === 'PATCH' && c.table === 'hospital_profiles');
+  assert.ok(patches.length >= 1, 'hospital_profiles PATCH 발생');
+  for (const p of patches) assert.equal('medical_services' in (p.body || {}), false, 'PATCH body 에 medical_services 없음');
+});
+
+test('count=0 / false 는 유효값 — endpoint 성공 시 그대로 저장', async () => {
+  const sb = makeMockSb();
+  const { after } = await seedThenRecollect(sb, {
+    hospital: { bed_total: 0, bed_detail: { standard: 0, higher: 0 } },
+    sources: { ...ALL_OK_SOURCES },
+  });
+  assert.equal(after.bed_total, 0, '0 은 빈 값이 아님');
+  assert.deepEqual(after.bed_detail, { standard: 0, higher: 0 });
+});
+
+test('동일 부분응답 재실행 → 멱등 (2회차 profile write 0)', async () => {
+  const sb = makeMockSb();
+  await persistCollected([mkItem()], { sb, now: NOW });
+  // 부분응답(장비 실패). collect 라면 동일 sources → 동일 hash. 여기선 동일 hash 를 명시.
+  const partialItem = () => mkItem({
+    hash: 'partial-hash', hospital: { equipment: null },
+    sources: { ...ALL_OK_SOURCES, equipment: 'failed' },
+  });
+  await persistCollected([partialItem()], { sb, now: NOW });
+  const w = sb.countWrites();
+  const r = await persistCollected([partialItem()], { sb, now: NOW });
+  assert.equal(r.stats.unchanged, 1);
+  assert.equal(sb.countWrites() - w, 2); // ingestion_runs POST+PATCH 만
+});
+
+test('부분 → 정상 회복: 다음 정상 수집에서 최신 값으로 복구', async () => {
+  const sb = makeMockSb();
+  await persistCollected([mkItem()], { sb, now: NOW });
+  // 장비 실패 → equipment 유지
+  await persistCollected([mkItem({ hash: 'h-partial', hospital: { equipment: null }, sources: { ...ALL_OK_SOURCES, equipment: 'failed' } })], { sb, now: NOW });
+  const mid = sb.tables.hospital_profiles[0].equipment;
+  assert.ok(mid && mid.length > 0, '부분수집 동안 equipment 유지됨');
+  // 정상 회복 (equipment 에 새 목록)
+  const recovered = [{ code: 'X999', name: 'CT', count: 1 }];
+  await persistCollected([mkItem({ hash: 'h-recovered', hospital: { equipment: recovered }, sources: { ...ALL_OK_SOURCES } })], { sb, now: NOW });
+  assert.deepEqual(sb.tables.hospital_profiles[0].equipment, recovered);
+});
+
+test('시설 기본정보(phone)의 정상 변경은 상세 endpoint 실패와 무관하게 반영', async () => {
+  const sb = makeMockSb();
+  await persistCollected([mkItem()], { sb, now: NOW });
+  const r = await persistCollected([mkItem({
+    hash: 'h-x', basis: { telno: '055-111-2222' },
+    hospital: { equipment: null, bed_detail: null },
+    sources: { ...ALL_OK_SOURCES, equipment: 'failed', facility: 'failed' },
+  })], { sb, now: NOW });
+  assert.equal(sb.tables.facilities[0].phone, '055-111-2222', 'basis 변경 반영');
+  assert.equal(r.stats.revisions, 1);
+  assert.ok(sb.tables.hospital_profiles[0].bed_detail, 'bed_detail 유지 (facility 실패)');
+});
+
+test('sources 는 facility_sources.raw / ingestion_runs 에 저장되지 않음', async () => {
+  const sb = makeMockSb();
+  await persistCollected([mkItem({ sources: { ...ALL_OK_SOURCES, equipment: 'failed' } })], { sb, now: NOW });
+  const src = sb.tables.facility_sources[0];
+  assert.equal('sources' in src, false);
+  assert.equal(JSON.stringify(src.raw).includes('success_with_data'), false);
+  assert.equal(JSON.stringify(src.raw).includes('"sources"'), false);
+  const run = sb.tables.ingestion_runs.find((x) => x.detail);
+  assert.equal(JSON.stringify(run.detail).includes('success_with_data'), false);
+  // 집계 수치(sourceIncomplete)는 허용 (기관 식별정보 아님)
+  assert.equal(typeof run.detail.sourceIncomplete, 'number');
+});
+
+test('부분실패 기관 있으면 ingestion_runs status=partial + sourceIncomplete 카운트', async () => {
+  const sb = makeMockSb();
+  const r = await persistCollected([
+    mkItem(),
+    mkItem({ basis: { ykiho: 'YK2', yadmNm: 'B' }, hospital: { id: 'H-YK2', external_id: 'YK2' }, sources: { ...ALL_OK_SOURCES, otherStaff: 'failed' } }),
+  ], { sb, now: NOW });
+  assert.equal(r.status, 'partial');
+  assert.equal(r.stats.sourceIncomplete, 1);
+  assert.equal(r.stats.failed, 0);
 });
 
 // ══════════════════════════════════════════════════════════════════════

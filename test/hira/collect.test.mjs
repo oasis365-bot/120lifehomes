@@ -68,6 +68,68 @@ test('부분 실패 — 전체 중단 없음, failures 에 재처리 정보 기�
   }
 });
 
+// ── source-aware 상태 (1B-4A) ───────────────────────────────────────
+test('sources — 정상 수집이면 모든 상세 step 이 success_with_data', async () => {
+  const c = makeMockClient({ listTotal: 2 });
+  const r = await collectHospitals(c, { maxInstitutions: 2 });
+  for (const it of r._normalizedAll) {
+    assert.deepEqual(Object.keys(it.sources).sort(),
+      ['departments', 'detail', 'equipment', 'facility', 'otherStaff', 'specialists']);
+    for (const st of Object.values(it.sources)) assert.equal(st, 'success_with_data');
+  }
+});
+
+test('sources — throw step=failed, 비정상 resultCode step=failed, 정상+0건 step=success_empty', async () => {
+  const c = makeMockClient({
+    listTotal: 1,
+    failSteps: new Set(['equipment']),        // throw
+    abnormalSteps: new Set(['departments']),  // gatewayError resultCode
+    emptySteps: new Set(['otherStaff']),      // 정상 0건
+  });
+  const r = await collectHospitals(c, { maxInstitutions: 1 });
+  const s = r._normalizedAll[0].sources;
+  assert.equal(s.equipment, 'failed');
+  assert.equal(s.departments, 'failed');
+  assert.equal(s.otherStaff, 'success_empty');
+  assert.equal(s.facility, 'success_with_data');
+  assert.equal(s.detail, 'success_with_data');
+  assert.equal(s.specialists, 'success_with_data');
+});
+
+test('sources — 응답·raw·samples 어디에도 sources 가 새 나가지 않음', async () => {
+  const c = makeMockClient({ listTotal: 3, failSteps: new Set(['equipment']) });
+  const r = await collectHospitals(c, { maxInstitutions: 3 });
+  const { _normalizedAll, ...pub } = r;
+  const blob = JSON.stringify(pub); // 응답으로 나가는 부분
+  assert.equal(/success_with_data|success_empty|"sources"/.test(blob), false);
+  for (const it of _normalizedAll) {
+    assert.equal('sources' in it.raw, false, 'raw 에 sources 없음');
+  }
+  for (const s of r.samples) {
+    assert.equal('sources' in s, false);
+  }
+});
+
+test('normalized_hash — 동일 부분응답이면 동일 해시(멱등), 회복 수집이면 다른 해시', async () => {
+  const partial = () => makeMockClient({ listTotal: 1, failSteps: new Set(['equipment']) });
+  const full = () => makeMockClient({ listTotal: 1 });
+  const h1 = (await collectHospitals(partial(), { maxInstitutions: 1 }))._normalizedAll[0].hospital.normalized_hash;
+  const h2 = (await collectHospitals(partial(), { maxInstitutions: 1 }))._normalizedAll[0].hospital.normalized_hash;
+  const h3 = (await collectHospitals(full(), { maxInstitutions: 1 }))._normalizedAll[0].hospital.normalized_hash;
+  assert.equal(h1, h2, '동일 부분응답 → 동일 해시');
+  assert.notEqual(h1, h3, '회복(정상) 수집 → 해시 변화');
+  assert.match(h1, /^[0-9a-f]{64}$/);
+});
+
+test('normalized_hash — endpoint failed 와 success_empty 는 같은 필드값이어도 다른 해시', async () => {
+  // equipment: throw(failed) vs 정상 0건(success_empty) → mapEquipment 결과는 둘 다 null(같은 필드값)
+  const failed = makeMockClient({ listTotal: 1, failSteps: new Set(['equipment']) });
+  const empty = makeMockClient({ listTotal: 1, emptySteps: new Set(['equipment']) });
+  const hF = (await collectHospitals(failed, { maxInstitutions: 1 }))._normalizedAll[0].hospital.normalized_hash;
+  const hE = (await collectHospitals(empty, { maxInstitutions: 1 }))._normalizedAll[0].hospital.normalized_hash;
+  assert.notEqual(hF, hE, 'failed ≠ success_empty (삭제 skip 방지)');
+});
+
 test('빈 상세 응답 처리 (facility 0건)', async () => {
   const c = makeMockClient({ listTotal: 2, emptySteps: new Set(['facility']) });
   const r = await collectHospitals(c, { maxInstitutions: 2 });

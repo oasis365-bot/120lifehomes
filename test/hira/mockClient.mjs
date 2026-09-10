@@ -14,8 +14,10 @@ const fx = (name) =>
  * @param {number} [opt.listTotal=5]        목록에 담을 (중복 포함) 항목 수
  * @param {number} [opt.dupEvery]           n번째마다 ykiho 중복 삽입
  * @param {number|number[]} [opt.dropNameAt]  이 인덱스 항목의 yadmNm(기관명) 제거 → 필수필드 미충족
- * @param {Set<string>} [opt.failSteps]     이 step 이름은 항상 throw ('facility'|'evaluation'...)
- * @param {Set<string>} [opt.emptySteps]    이 step 은 빈 결과 반환
+ * @param {Set<string>} [opt.failSteps]     이 step 이름은 항상 throw (timeout/network/5xx 흉내)
+ * @param {Set<string>} [opt.abnormalSteps] 이 step 은 비정상 resultCode(gatewayError) 반환 → collect 가 'failed' 로 표시
+ * @param {string} [opt.abnormalCode='1']   위 비정상 응답의 resultCode
+ * @param {Set<string>} [opt.emptySteps]    이 step 은 resultCode 정상 + 0건 (success_empty)
  * @param {number} [opt.listEmptyFirst=0]   처음 N 번의 listHospitals 호출은 "정상 resultCode + 0건" 반환
  * @param {number|null} [opt.listEmptyTotal]  위 빈 응답이 보고할 totalCount (기본 listTotal, null 이면 totalCount 미포함)
  * @param {number} [opt.listThrowFirst=0]   처음 N 번의 listHospitals 호출은 HiraError throw (client 재시도 소진 흉내)
@@ -30,6 +32,7 @@ export function makeMockClient(opt = {}) {
   const calls = [];
   const tick = typeof opt.tick === 'function' ? opt.tick : () => {};
   const failSteps = opt.failSteps ?? new Set();
+  const abnormalSteps = opt.abnormalSteps ?? new Set();
   const emptySteps = opt.emptySteps ?? new Set();
   let listCallNo = 0;
   const pageEmptyBudget = { ...(opt.emptyOnPage || {}) };
@@ -41,6 +44,13 @@ export function makeMockClient(opt = {}) {
       const e = new Error(`mock fail: ${step}`);
       e.reason = 'gateway';
       throw e;
+    }
+    if (abnormalSteps.has(step)) {
+      return {
+        format: 'json', gatewayError: true,
+        resultCode: opt.abnormalCode ?? '1', resultMsg: 'APPLICATION ERROR',
+        totalCount: null, numOfRows: 10, pageNo: 1, items: [],
+      };
     }
     if (emptySteps.has(step)) {
       return { format: 'json', gatewayError: false, resultCode: '00', resultMsg: 'NORMAL SERVICE.', totalCount: 0, numOfRows: 10, pageNo: 1, items: [] };

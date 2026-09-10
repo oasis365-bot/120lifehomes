@@ -184,12 +184,16 @@ export function createHandler(deps = {}) {
           return;
         }
 
+        // persistStatus 로 부분수집을 이미 신호하므로, 내부 판단용 카운트(sourceIncomplete)는
+        // HTTP 응답에서 제외 (상세 내역은 ingestion_runs.detail 에만).
+        const { sourceIncomplete: _si, ...pubStats } = persisted.stats || {};
+        void _si;
         res.status(200).json({
           ok: true,
           dryRun: false,
           runId: persisted.runId,
-          persisted: persisted.stats,
-          persistStatus: persisted.status,
+          persisted: pubStats,
+          persistStatus: persisted.status, // 'ok' | 'partial' | 'failed'
           collectedCount,
           normalizedCount,
           persistInputCount,

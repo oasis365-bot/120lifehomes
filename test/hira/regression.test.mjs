@@ -69,6 +69,57 @@ test('1B-3B 안전: 허용 host 미지정이면 verifyPreviewDbUrl 은 fail-clos
   }
 });
 
+test('1B-4A: profileDiff 는 source-aware — blanket forward-fill 아님 (정적)', () => {
+  const src = read('lib/hira/persist.js');
+  assert.ok(/function profileDiff\(existing, next, sources\)/.test(src), 'profileDiff(sources) 시그니처');
+  assert.ok(src.includes('fieldSourcesOk') && src.includes('PROFILE_FIELD_SOURCES'), '게이트/매핑 없음');
+  // 빈값 skip 은 반드시 "권위 있는 없음(success_empty)이 아닐 때"와 결합돼야 함 (blanket 아님)
+  assert.ok(src.includes('anyReqStepEmpty'), 'success_empty 판별 함수 없음');
+  assert.ok(/isEmptyProfileValue\(next\[k\]\)\s*&&\s*!anyReqStepEmpty/.test(src), '빈값 skip 이 authoritative 신호와 결합 안 됨');
+  // "next[k] 가 null 이면 단독으로 skip" 은 없어야 함
+  assert.equal(/if\s*\(\s*(next\[k\]|value)\s*(==|===)\s*null\s*\)\s*continue/.test(src), false);
+  assert.equal(src.includes('!next[k])'), false, 'truthy 검사로 0/false 를 빈 값 취급');
+  // 0·false 는 유효값 (isEmptyProfileValue 가 명시적으로 number/boolean 제외)
+  assert.ok(src.includes("v === null || v === undefined || v === ''"), 'isEmptyProfileValue 명시 조건 없음');
+});
+
+test('1B-4A: medical_services 는 파이프라인 미소유 — profileDiff 가 절대 갱신하지 않음 (정적)', () => {
+  const src = read('lib/hira/persist.js');
+  assert.ok(src.includes('PROFILE_NOT_OWNED'), 'PROFILE_NOT_OWNED 없음');
+  assert.ok(/PROFILE_NOT_OWNED\s*=\s*new Set\(\[[^\]]*'medical_services'/.test(src), 'medical_services 미소유 목록에 없음');
+  assert.ok(/PROFILE_NOT_OWNED\.has\(k\)\)\s*continue/.test(src), 'profileDiff 가 미소유 컬럼을 skip 안 함');
+  // 코드 "로직"은 검증 상태값을 판단하지 않음 (분기 조건에 status 문자열이 없음)
+  const codeOnly = src.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.equal(/(===|!==|includes\().*FACILITY_CLAIMED/.test(codeOnly), false, '로직이 FACILITY_CLAIMED 를 판단');
+});
+
+test('1B-4A: 내부 sources 는 rawBundle·facility_sources 저장 body 의 "키"로 들어가지 않음 (정적)', () => {
+  // "sources:" 를 객체 키로 쓰는 위치를 검사 (facility_sources 같은 식별자 부분일치는 제외)
+  const keyRe = /(^|[^_A-Za-z0-9])sources\s*:/;
+
+  // collect: rawBundle 객체 정의에 sources 키 없음
+  const c = read('lib/hira/collect.js');
+  const defStart = c.indexOf('const rawBundle = {');
+  assert.ok(defStart > 0, 'rawBundle 정의를 못 찾음');
+  const rawDef = c.slice(defStart, c.indexOf('};', defStart) + 2);
+  assert.equal(keyRe.test(rawDef), false, 'rawBundle 정의에 sources: 키');
+
+  // persist: facility_sources 저장 body 에 sources 키 없음
+  const p = read('lib/hira/persist.js');
+  const at = p.indexOf("sb('facility_sources");
+  assert.ok(at > 0);
+  const fsBody = p.slice(p.indexOf('body: [{', at), p.indexOf('}]', at) + 2);
+  assert.equal(keyRe.test(fsBody), false, 'facility_sources body 에 sources: 키');
+});
+
+test('1B-4A: 기존 LTC 파일 무변경 (이 브랜치는 lib/hira + api/hospital 만 건드림)', () => {
+  // 이 테스트는 정적 신호만 — 실제 diff 는 CI 의 main 대비 비교로 확인.
+  for (const f of ['api/facilities.js', 'api/facility.js', 'api/ingest.js', 'api/enrich.js', 'api/consult.js', 'lib/db.js', 'lib/facilitySelect.js']) {
+    const src = read(f);
+    assert.equal(/hira\/(collect|adapter|persist)/.test(src), false, `${f} 가 hira 모듈 참조`);
+  }
+});
+
 test('기존 요양원 수집기/정규화 파일은 이 브랜치에서 변경되지 않음', () => {
   // 파일 존재 + 핵심 시그니처만 확인 (내용 변경 여부는 git diff 로 별도 검증)
   const ingest = read('api/ingest.js');

@@ -7,6 +7,7 @@ import {
   normalizeHospitalRecord,
   normalizeEvaluationRecord,
   normalizedHash,
+  stripForHash,
   toCoord,
   toDateISO,
   toCount,
@@ -183,6 +184,20 @@ test('normalizedHash 는 키 순서에 무관하게 안정적', () => {
   const a = normalizedHash({ x: 1, y: [{ b: 2, a: 1 }] });
   const b = normalizedHash({ y: [{ a: 1, b: 2 }], x: 1 });
   assert.equal(a, b);
+});
+
+test('stripForHash — _warnings / normalized_hash 제외, 나머지 그대로 (해시 계약)', () => {
+  const n = normalizeHospitalRecord(realBundle());
+  const s = stripForHash(n);
+  assert.equal('_warnings' in s, false);
+  assert.equal('normalized_hash' in s, false);
+  assert.equal(s.external_id, n.external_id);
+  assert.equal(s.bed_total, n.bed_total);
+  // collect 가 쓰는 source-aware 합성: sources 순서/추가에 대해 안정적
+  const h1 = normalizedHash({ core: s, sources: { a: 'x', b: 'y' } });
+  const h2 = normalizedHash({ sources: { b: 'y', a: 'x' }, core: s });
+  assert.equal(h1, h2);
+  assert.notEqual(h1, normalizedHash({ core: s, sources: { a: 'x', b: 'z' } }));
 });
 
 test('util — toDateISO / toCount / normalizeSido', () => {

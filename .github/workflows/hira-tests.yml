@@ -4,7 +4,7 @@
 #  · 빌드·배포·환경변수에 영향 없음 (테스트만).
 #
 #  트리거:
-#   · push  → main, feature/hospital-hira-adapter
+#   · push  → main, feature/**  (모든 feature 브랜치)
 #   · pull_request → base 가 main 인 모든 PR
 #   · 수동 (workflow_dispatch)
 #  중복 방지: concurrency group 을 브랜치명으로 정규화(head_ref || ref_name).
@@ -14,7 +14,7 @@ name: hira-tests
 
 on:
   push:
-    branches: ['main', 'feature/hospital-hira-adapter']
+    branches: ['main', 'feature/**']
   pull_request:
     branches: ['main']
   workflow_dispatch:
