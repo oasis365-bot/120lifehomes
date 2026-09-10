@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>요양병원 찾기 | 120 라이프홈즈</title>
+<meta name="description" content="치료와 의료적 관리가 필요한 어르신을 위한 요양병원을 지역과 기관명으로 검색합니다.">
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css?v=20260901i">
+<link rel="stylesheet" href="assets/css/hospital.css?v=20260910a">
+</head>
+<body style="font-family:'Noto Sans KR',sans-serif">
+<div id="chrome-header"></div>
+
+<main class="wrap" id="hospital-search">
+  <div class="breadcrumb"><a href="index.html">홈</a> › 요양병원 찾기</div>
+
+  <!-- 기능 OFF: 준비 중 안내만 -->
+  <section data-h="prep" class="h-prep" hidden>
+    <h1>요양병원 찾기</h1>
+    <p class="h-prep-lead">현재 준비 중인 서비스입니다.</p>
+    <p>요양병원 정보 검색은 곧 제공될 예정입니다. 지금은 <a href="search.html">장기요양기관(요양원 등) 검색</a>을 이용해 주세요.</p>
+  </section>
+
+  <!-- 기능 ON: 검색 화면 -->
+  <section data-h="search" hidden>
+    <header class="h-head">
+      <h1>요양병원 찾기</h1>
+      <p class="h-head-lead">치료와 의료적 관리가 필요한 어르신을 위한 요양병원 검색</p>
+    </header>
+
+    <form class="h-filter" data-h="form">
+      <div class="h-filter-row">
+        <div class="h-field">
+          <label for="h-q">기관명 · 주소</label>
+          <input id="h-q" data-h="q" type="text" autocomplete="off" placeholder="예) 서울요양병원, 강남구">
+        </div>
+        <div class="h-field">
+          <label for="h-sido">시 · 도</label>
+          <select id="h-sido" data-h="sido">
+            <option value="">전국</option>
+          </select>
+        </div>
+        <div class="h-field">
+          <label for="h-sigungu">시 · 군 · 구</label>
+          <select id="h-sigungu" data-h="sigungu">
+            <option value="">시·군·구 전체</option>
+          </select>
+        </div>
+      </div>
+      <div class="h-filter-actions">
+        <button type="submit" class="btn btn-green">요양병원 검색</button>
+        <button type="button" class="btn btn-ghost" data-h="reset">조건 초기화</button>
+      </div>
+    </form>
+
+    <div class="h-results-head">
+      <div class="h-count" data-h="count">검색 결과</div>
+    </div>
+
+    <p class="h-status" data-h="status" role="status" aria-live="polite" hidden></p>
+
+    <div class="h-list" data-h="list"></div>
+
+    <nav class="h-pager" data-h="pager" aria-label="검색 결과 페이지" hidden>
+      <button type="button" class="btn btn-ghost" data-h="prev">← 이전</button>
+      <span class="h-pageinfo" data-h="pageinfo"></span>
+      <button type="button" class="btn btn-ghost" data-h="next">다음 →</button>
+    </nav>
+  </section>
+</main>
+
+<div id="chrome-footer"></div>
+
+<script src="assets/js/regioncodes.js?v=20260901i"></script>
+<script src="assets/js/data.js?v=20260901i"></script>
+<script src="assets/js/app.js?v=20260901i"></script>
+<script src="assets/js/hospital.js?v=20260910a"></script>
+<script>mountChrome("");</script>
+</body>
+</html>

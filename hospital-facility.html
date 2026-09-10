@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>요양병원 상세 | 120 라이프홈즈</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css?v=20260901i">
+<link rel="stylesheet" href="assets/css/hospital.css?v=20260910a">
+</head>
+<body style="font-family:'Noto Sans KR',sans-serif">
+<div id="chrome-header"></div>
+
+<main class="wrap" id="hospital-detail">
+  <section data-h="prep" class="h-prep" hidden>
+    <h1>요양병원 상세</h1>
+    <p class="h-prep-lead">현재 준비 중인 서비스입니다.</p>
+    <p><a href="search.html">장기요양기관 검색</a>을 이용해 주세요.</p>
+  </section>
+
+  <p class="h-status" data-h="status" role="status" aria-live="polite" hidden></p>
+
+  <section data-h="body" hidden>
+    <div class="h-detail-loading">요양병원 정보를 불러오는 중입니다…</div>
+  </section>
+</main>
+
+<div id="chrome-footer"></div>
+
+<script src="assets/js/regioncodes.js?v=20260901i"></script>
+<script src="assets/js/data.js?v=20260901i"></script>
+<script src="assets/js/app.js?v=20260901i"></script>
+<script src="assets/js/hospital.js?v=20260910a"></script>
+<script>mountChrome("");</script>
+</body>
+</html>
