@@ -482,6 +482,90 @@ test('persistCollected 정상 1건 → status ok (회귀: 합계검증이 정상
   assert.equal(sb.tables.ingestion_runs[0].status, 'ok');
 });
 
+// ── 1B-4A source-aware: 실제 collect → persist 왕복 ──────────────────
+async function runIngest(sb, clientOpt, limit = 3) {
+  const res = mkRes();
+  await createHandler(realDeps(sb, clientOpt))(
+    mkReq({ headers: auth, query: { dryRun: 'false', limit: String(limit) } }), res);
+  return res;
+}
+
+test('통합: 완전수집 후 장비 endpoint timeout 재수집 → equipment 유지, 다른 필드 갱신', async () => {
+  const sb = makeMockSb();
+  await runIngest(sb, { listTotal: 3 }); // 1차 완전 수집
+  const eq0 = sb.tables.hospital_profiles.map((p) => JSON.stringify(p.equipment));
+  assert.ok(sb.tables.hospital_profiles.every((p) => Array.isArray(p.equipment) && p.equipment.length));
+
+  // 2차: 장비 endpoint 만 실패 (전화번호도 바뀌었다고 가정 → basis 변경)
+  await runIngest(sb, { listTotal: 3, failSteps: new Set(['equipment']) });
+  const eq1 = sb.tables.hospital_profiles.map((p) => JSON.stringify(p.equipment));
+  assert.deepEqual(eq1, eq0, 'equipment 전부 유지 (endpoint 실패로 지워지지 않음)');
+});
+
+test('통합: 진료과 endpoint 비정상 resultCode → specialties/specialist_counts 유지', async () => {
+  const sb = makeMockSb();
+  await runIngest(sb, { listTotal: 2 }, 2);
+  const sp0 = sb.tables.hospital_profiles.map((p) => JSON.stringify(p.specialties));
+  const sc0 = sb.tables.hospital_profiles.map((p) => JSON.stringify(p.specialist_counts));
+  assert.ok(sb.tables.hospital_profiles.every((p) => p.specialties.length));
+
+  await runIngest(sb, { listTotal: 2, abnormalSteps: new Set(['departments']) }, 2);
+  assert.deepEqual(sb.tables.hospital_profiles.map((p) => JSON.stringify(p.specialties)), sp0);
+  assert.deepEqual(sb.tables.hospital_profiles.map((p) => JSON.stringify(p.specialist_counts)), sc0);
+});
+
+test('통합: 부분수집 상태에서 ingestion_runs status=partial, 응답에 내부 sources 없음', async () => {
+  const sb = makeMockSb();
+  const res = mkRes();
+  await createHandler(realDeps(sb, { listTotal: 3, failSteps: new Set(['equipment']) }))(
+    mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.persistStatus, 'partial');
+  assert.equal(res.body.persisted.new, 3);
+  assert.equal('sourceIncomplete' in res.body.persisted, false, 'HTTP 응답엔 내부 카운트 미노출');
+  const run = sb.tables.ingestion_runs[0];
+  assert.equal(run.status, 'partial');
+  assert.equal(run.detail.sourceIncomplete, 3, 'ingestion_runs.detail 에는 집계 수치 기록');
+  // 내부 상태 맵(step→status) 은 어디에도 안 나감
+  const blob = JSON.stringify(res.body) + JSON.stringify(sb.tables.ingestion_runs) + JSON.stringify(sb.tables.facility_sources);
+  assert.equal(/success_with_data|success_empty|"sources"/.test(blob), false);
+  assert.equal(/serviceKey|supabase\.co|JDQ4[A-Za-z0-9+/]{16,}/.test(blob), false);
+});
+
+test('통합: 부분수집 재실행 멱등 (2회차 profile write 0), 이후 정상수집에서 회복', async () => {
+  const sb = makeMockSb();
+  await runIngest(sb, { listTotal: 1 }, 1);                                    // 완전
+  await runIngest(sb, { listTotal: 1, failSteps: new Set(['equipment']) }, 1); // 장비 실패
+  const w = sb.countWrites();
+  const res3 = await runIngest(sb, { listTotal: 1, failSteps: new Set(['equipment']) }, 1);
+  // 동일 부분응답 → 동일 source-aware hash → unchanged
+  assert.equal(res3.body.persisted.unchanged, 1);
+  assert.equal(sb.countWrites() - w, 2, 'ingestion_runs POST+PATCH 만');
+  assert.equal(sb.tables.hospital_profiles.length, 1);
+
+  // 정상 회복
+  await runIngest(sb, { listTotal: 1 }, 1);
+  assert.ok(Array.isArray(sb.tables.hospital_profiles[0].equipment) && sb.tables.hospital_profiles[0].equipment.length,
+    'equipment 최신 값으로 회복');
+});
+
+test('통합: 신규 기관도 일부 상세 endpoint 실패 시 가용 정보로 저장 (실패 필드는 null), 고아행 없음', async () => {
+  const sb = makeMockSb();
+  await createHandler(realDeps(sb, { listTotal: 3, failSteps: new Set(['equipment', 'facility']) }))(
+    mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), mkRes());
+  assert.equal(sb.tables.facilities.filter((f) => f.domain === 'HOSPITAL').length, 3);
+  assert.equal(sb.tables.hospital_profiles.length, 3);
+  for (const p of sb.tables.hospital_profiles) {
+    assert.equal(p.equipment, null);      // 실패 → null
+    assert.equal(p.bed_total, null);
+    assert.ok(p.specialties.length);      // 성공 → 저장
+  }
+  // 고아행: profile.facility_id 는 전부 facilities.id 에 존재
+  const ids = new Set(sb.tables.facilities.map((f) => f.id));
+  assert.ok(sb.tables.hospital_profiles.every((p) => ids.has(p.facility_id)));
+  assert.ok(sb.tables.facility_sources.every((s) => s.facility_id == null || ids.has(s.facility_id)));
+});
+
 // ── 비밀 비노출 ────────────────────────────────────────────────────
 test('통합 응답에 ykiho 원문·serviceKey·URL 없음', async () => {
   const sb = makeMockSb();
