@@ -48,7 +48,7 @@ function safeEqual(a, b) {
 const scrubToken = (s) => String(s).replace(/[A-Za-z0-9+/]{40,}={0,2}/g, '***');
 
 /**
- * JSON body 계약 검증(1B-5A). req.query 는 절대 참조하지 않는다.
+ * JSON body 계약 검증(1B-5A). 쿼리스트링은 절대 참조하지 않는다.
  *  · body 미전송(undefined) → {} 로 취급(전부 기본값).
  *  · null / 배열 / object 가 아닌 타입 → invalid.
  *  · dryRun/readiness: 존재하면 boolean 만 허용.
