@@ -47,9 +47,15 @@ begin;
 --  "활성" 정의(아래 partial unique index 근거) = pending/running/paused_for_today.
 --    완료/실패/취소는 터미널 상태이므로 같은 job 종류로 새 작업을 다시 만들 수 있어야 함.
 --  phase: discovery(목록 수집 중) → enrichment(기관별 상세 수집 중) → done(둘 다 종료).
+-- job 종류 allowlist. 지금은 지원하는 job 이 하나뿐이므로 free text 대신 CHECK 로
+-- 고정한다(그렇지 않으면 오타/공백 차이만 나는 두 문자열이 partial unique index를
+-- "다른 job" 으로 취급해 우회 — 예: 'hira_hospital_nationwide' vs 'hira_hospital_nationwide '
+-- 는 별개 값이라 각자 활성 job 을 하나씩 가질 수 있어 활성-작업 단일성 보장이 무력화됨).
+-- 새 job 종류가 필요해지면 이 CHECK 를 확장하는 새 migration 을 명시적으로 추가한다
+-- (이 migration 을 되돌려서 고치지 않음 — additive 원칙).
 create table if not exists public.hospital_collection_jobs (
   id                     uuid primary key default gen_random_uuid(),
-  job                    text not null,                       -- 예: 'hira_hospital_nationwide' (자유 텍스트, ingestion_runs.job 과 동일 관례)
+  job                    text not null,                       -- allowlist: 'hira_hospital_nationwide' (아래 CHECK)
   status                 text not null default 'pending',
   phase                  text not null default 'discovery',
 
@@ -94,7 +100,15 @@ create table if not exists public.hospital_collection_jobs (
       count_processed   >= 0 and count_new     >= 0 and count_updated >= 0 and
       count_unchanged   >= 0 and count_partial >= 0 and count_failed  >= 0 and
       count_dead_letter >= 0
-    )
+    ),
+  -- job allowlist(현재 지원 종류 1개). 새 종류 추가는 별도 migration 에서 이 CHECK 를 확장.
+  constraint hospital_collection_jobs_job_chk
+    check (job in ('hira_hospital_nationwide')),
+  -- lease_owner/last_error_code 길이 상한(형식 오류·비정상 값 방어, 실제 값은 짧은 run-id/코드).
+  constraint hospital_collection_jobs_lease_owner_len_chk
+    check (lease_owner is null or char_length(lease_owner) between 1 and 128),
+  constraint hospital_collection_jobs_last_error_code_len_chk
+    check (last_error_code is null or char_length(last_error_code) between 1 and 64)
 );
 
 -- 같은 job 종류에서 "활성"(터미널이 아닌) 작업이 동시에 여러 개 생기지 않도록.
@@ -144,6 +158,11 @@ create table if not exists public.hospital_collection_items (
   -- 형식만 가벼운 CHECK 로 고정(FK 대체 아님) — "H-" 로 시작하는 결정론적 id 만 허용.
   constraint hospital_collection_items_facility_id_format_chk
     check (facility_id like 'H-%'),
+  -- 길이 상한(비정상적으로 긴 값 방어). "H-"+ykiho 는 실측상 100자를 크게 넘지 않음.
+  constraint hospital_collection_items_facility_id_len_chk
+    check (char_length(facility_id) between 3 and 200),
+  constraint hospital_collection_items_last_error_code_len_chk
+    check (last_error_code is null or char_length(last_error_code) between 1 and 64),
   constraint uq_hospital_collection_items_job_facility unique (job_id, facility_id),
   constraint uq_hospital_collection_items_job_ordinal  unique (job_id, ordinal)
 );
@@ -201,7 +220,7 @@ begin
   if p_job_id is null then
     raise exception 'invalid_job_id' using errcode = '22023';
   end if;
-  if p_owner is null or length(btrim(p_owner)) = 0 then
+  if p_owner is null or length(btrim(p_owner)) = 0 or length(p_owner) > 128 then
     raise exception 'invalid_owner' using errcode = '22023';
   end if;
   if p_lease_seconds is null or p_lease_seconds <= 0 or p_lease_seconds > 3600 then
@@ -238,7 +257,7 @@ begin
   if p_job_id is null then
     raise exception 'invalid_job_id' using errcode = '22023';
   end if;
-  if p_owner is null or length(btrim(p_owner)) = 0 then
+  if p_owner is null or length(btrim(p_owner)) = 0 or length(p_owner) > 128 then
     raise exception 'invalid_owner' using errcode = '22023';
   end if;
   if p_lease_seconds is null or p_lease_seconds <= 0 or p_lease_seconds > 3600 then
@@ -276,7 +295,7 @@ begin
   if p_job_id is null then
     raise exception 'invalid_job_id' using errcode = '22023';
   end if;
-  if p_owner is null or length(btrim(p_owner)) = 0 then
+  if p_owner is null or length(btrim(p_owner)) = 0 or length(p_owner) > 128 then
     raise exception 'invalid_owner' using errcode = '22023';
   end if;
   if p_next_status is not null

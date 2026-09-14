@@ -55,6 +55,9 @@ test('006 up: hospital_collection_jobs 필수 CHECK/인덱스 존재', () => {
     'hospital_collection_jobs_discovery_page_chk',
     'hospital_collection_jobs_snapshot_total_chk',
     'hospital_collection_jobs_counts_nonneg_chk',
+    'hospital_collection_jobs_job_chk',
+    'hospital_collection_jobs_lease_owner_len_chk',
+    'hospital_collection_jobs_last_error_code_len_chk',
     'uq_hospital_collection_jobs_active_per_job',
     'idx_hospital_collection_jobs_job_status',
     'idx_hospital_collection_jobs_lease_expires',
@@ -64,6 +67,20 @@ test('006 up: hospital_collection_jobs 필수 CHECK/인덱스 존재', () => {
   // status/phase 허용값 목록이 요구된 값과 정확히 일치
   assert.match(src, /status in \('pending','running','paused_for_today','completed','failed','cancelled'\)/);
   assert.match(src, /phase in \('discovery','enrichment','done'\)/);
+});
+
+test('006 up: job 은 free text 가 아니라 allowlist CHECK 로 고정됨(partial unique 우회 방지)', () => {
+  const src = read(UP);
+  const at = src.indexOf('constraint hospital_collection_jobs_job_chk');
+  assert.ok(at > 0);
+  const block = src.slice(at, src.indexOf(',', at) + 1);
+  assert.match(block, /check \(job in \('hira_hospital_nationwide'\)\)/);
+});
+
+test('006 up: lease_owner/last_error_code(jobs) 는 길이 상한 CHECK 를 가짐', () => {
+  const src = read(UP);
+  assert.ok(src.includes('char_length(lease_owner) between 1 and 128'));
+  assert.ok(src.includes("check (last_error_code is null or char_length(last_error_code) between 1 and 64)"));
 });
 
 test('006 up: 활성-작업 partial unique index 는 정확히 pending/running/paused_for_today 범위(터미널 상태 제외)', () => {
@@ -82,6 +99,8 @@ test('006 up: hospital_collection_items 필수 CHECK/UNIQUE/인덱스 존재', (
     'hospital_collection_items_attempt_count_chk',
     'hospital_collection_items_ordinal_chk',
     'hospital_collection_items_facility_id_format_chk',
+    'hospital_collection_items_facility_id_len_chk',
+    'hospital_collection_items_last_error_code_len_chk',
     'uq_hospital_collection_items_job_facility',
     'uq_hospital_collection_items_job_ordinal',
     'idx_hospital_collection_items_job_status_ordinal',
@@ -91,6 +110,7 @@ test('006 up: hospital_collection_items 필수 CHECK/UNIQUE/인덱스 존재', (
   assert.match(src, /status in \('pending','processing','retry_wait','completed','dead_letter'\)/);
   assert.ok(src.includes('unique (job_id, facility_id)'));
   assert.ok(src.includes('unique (job_id, ordinal)'));
+  assert.ok(src.includes('char_length(facility_id) between 3 and 200'));
 });
 
 test('006 up: hospital_collection_items 는 facilities FK 를 걸지 않음(의도적 비연결)', () => {
@@ -196,6 +216,19 @@ test('acquire_lease: 만료되지 않은(살아있는) 다른 owner 의 lease �
   assert.ok(block.includes('lease_owner is null or lease_expires_at is null or lease_expires_at < now()'));
 });
 
+test('lease 함수 3개 전부 p_owner 길이 상한(128) 검증(테이블 CHECK 와 일치)', () => {
+  const src = read(UP);
+  for (const fn of [
+    'hospital_collection_job_acquire_lease',
+    'hospital_collection_job_heartbeat',
+    'hospital_collection_job_release_lease',
+  ]) {
+    const at = src.indexOf(`create or replace function public.${fn}(`);
+    const block = src.slice(at, src.indexOf('\n$$;', at));
+    assert.ok(block.includes('length(p_owner) > 128'), `${fn} 에 owner 길이 상한 검증 없음`);
+  }
+});
+
 test('heartbeat/release: 현재 owner 일치 조건이 WHERE 절에 있음(임의 owner 가 남의 lease 조작 불가)', () => {
   const src = read(UP);
   for (const fn of ['hospital_collection_job_heartbeat', 'hospital_collection_job_release_lease']) {
@@ -278,7 +311,8 @@ test('006 down: 신규 객체(테이블 3개+함수 4개)만 제거하고 facili
 test('007 verify: 필수 검증 항목이 모두 존재(테이블/CHECK/UNIQUE/인덱스/RLS/policy0/함수권한)', () => {
   const src = read(VERIFY);
   const mustInclude = [
-    'C1 신규 테이블 생성 수', 'C2 hospital_collection_jobs CHECK 수', 'C3 uq_hospital_collection_jobs_active_per_job',
+    'C1 신규 테이블 생성 수', 'C2 hospital_collection_jobs CHECK 수', 'C2b hospital_collection_jobs_job_chk',
+    'C3 uq_hospital_collection_jobs_active_per_job',
     'C3b 활성 상태 범위 고정', 'C4 hospital_collection_items UNIQUE 수', 'C5 hospital_collection_items CHECK 수',
     'C6 idx_hospital_collection_items_job_status_ordinal', 'C7 hospital_collection_items → facilities FK 없음',
     'C8 hospital_collection_items 금지 컬럼명 패턴', 'C9 hospital_hira_daily_usage CHECK 수',

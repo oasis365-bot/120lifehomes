@@ -22,13 +22,24 @@ with v as (
               then 'OK' else 'FAIL' end as verdict
 
   union all
-  -- C2. hospital_collection_jobs 의 CHECK 제약 5개
-  select 'C2 hospital_collection_jobs CHECK 수(기대 5)',
+  -- C2. hospital_collection_jobs 의 CHECK 제약 8개(status/phase/discovery_page/
+  --     snapshot_total/counts_nonneg/job_allowlist/lease_owner_len/last_error_code_len)
+  select 'C2 hospital_collection_jobs CHECK 수(기대 8)',
          (select count(*)::text from pg_constraint
            where conrelid='public.hospital_collection_jobs'::regclass and contype='c'),
-         '5',
+         '8',
          case when (select count(*) from pg_constraint
-           where conrelid='public.hospital_collection_jobs'::regclass and contype='c') = 5
+           where conrelid='public.hospital_collection_jobs'::regclass and contype='c') = 8
+              then 'OK' else 'FAIL' end
+
+  union all
+  -- C2b. job 종류가 allowlist CHECK 로 고정돼 있는지(free text 로 partial unique 우회 방지)
+  select 'C2b hospital_collection_jobs_job_chk 존재',
+         exists(select 1 from pg_constraint
+           where conrelid='public.hospital_collection_jobs'::regclass and conname='hospital_collection_jobs_job_chk')::text,
+         'true',
+         case when exists(select 1 from pg_constraint
+           where conrelid='public.hospital_collection_jobs'::regclass and conname='hospital_collection_jobs_job_chk')
               then 'OK' else 'FAIL' end
 
   union all
@@ -58,7 +69,7 @@ with v as (
              ) then 'OK' else 'FAIL' end
 
   union all
-  -- C4. hospital_collection_items 의 UNIQUE 제약 2개 + CHECK 4개
+  -- C4. hospital_collection_items 의 UNIQUE 제약 2개 + CHECK 6개
   select 'C4 hospital_collection_items UNIQUE 수(기대 2)',
          (select count(*)::text from pg_constraint
            where conrelid='public.hospital_collection_items'::regclass and contype='u'),
@@ -68,12 +79,13 @@ with v as (
               then 'OK' else 'FAIL' end
 
   union all
-  select 'C5 hospital_collection_items CHECK 수(기대 4)',
+  -- C5. status/attempt_count/ordinal/facility_id_format/facility_id_len/last_error_code_len
+  select 'C5 hospital_collection_items CHECK 수(기대 6)',
          (select count(*)::text from pg_constraint
            where conrelid='public.hospital_collection_items'::regclass and contype='c'),
-         '4',
+         '6',
          case when (select count(*) from pg_constraint
-           where conrelid='public.hospital_collection_items'::regclass and contype='c') = 4
+           where conrelid='public.hospital_collection_items'::regclass and contype='c') = 6
               then 'OK' else 'FAIL' end
 
   union all
