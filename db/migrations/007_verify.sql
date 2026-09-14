@@ -79,13 +79,31 @@ with v as (
               then 'OK' else 'FAIL' end
 
   union all
-  -- C5. status/attempt_count/ordinal/facility_id_format/facility_id_len/last_error_code_len
+  -- C5. status/attempt_count/ordinal/facility_id_format/facility_id_len/last_error_code_fmt
   select 'C5 hospital_collection_items CHECK 수(기대 6)',
          (select count(*)::text from pg_constraint
            where conrelid='public.hospital_collection_items'::regclass and contype='c'),
          '6',
          case when (select count(*) from pg_constraint
            where conrelid='public.hospital_collection_items'::regclass and contype='c') = 6
+              then 'OK' else 'FAIL' end
+
+  union all
+  -- C5b. last_error_code 는 "정확한 코드 allowlist" 가 아니라 slug 형식(소문자·숫자·
+  --      underscore, 1~64자)만 강제해야 함 — jobs/items 양쪽 constraint 정의를
+  --      pg_get_constraintdef 로 직접 확인(길이만 재는 예전 계약으로 되돌아가지 않았는지).
+  select 'C5b last_error_code slug 정규식 CHECK(jobs+items, 정확한 allowlist 아님)',
+         (select pg_get_constraintdef(oid) from pg_constraint
+           where conrelid='public.hospital_collection_jobs'::regclass and conname='hospital_collection_jobs_last_error_code_fmt_chk'),
+         '~ ''^[a-z0-9_]{1,64}$'' 형태 포함',
+         case when
+           (select pg_get_constraintdef(oid) from pg_constraint
+             where conrelid='public.hospital_collection_jobs'::regclass and conname='hospital_collection_jobs_last_error_code_fmt_chk')
+             like '%~ ''^[a-z0-9_]{1,64}$''%'
+           and
+           (select pg_get_constraintdef(oid) from pg_constraint
+             where conrelid='public.hospital_collection_items'::regclass and conname='hospital_collection_items_last_error_code_fmt_chk')
+             like '%~ ''^[a-z0-9_]{1,64}$''%'
               then 'OK' else 'FAIL' end
 
   union all
@@ -184,6 +202,16 @@ with v as (
           where n.nspname='public' and p.proname in
            ('hospital_collection_job_acquire_lease','hospital_collection_job_heartbeat',
             'hospital_collection_job_release_lease','hospital_hira_reserve_daily_calls')) = 4
+              then 'OK' else 'FAIL' end
+
+  union all
+  -- C13b. heartbeat 가 "만료되지 않은 lease" 조건을 실제로 갖고 있는지(만료 lease
+  --       부활 차단) — 함수 소스(pg_get_functiondef)를 직접 검사.
+  select 'C13b heartbeat 만료 lease 부활 차단 조건 존재',
+         (pg_get_functiondef('public.hospital_collection_job_heartbeat(uuid,text,integer)'::regprocedure) ilike '%lease_expires_at > now()%')::text,
+         'true',
+         case when pg_get_functiondef('public.hospital_collection_job_heartbeat(uuid,text,integer)'::regprocedure) ilike '%lease_expires_at > now()%'
+              and pg_get_functiondef('public.hospital_collection_job_heartbeat(uuid,text,integer)'::regprocedure) ilike '%lease_expires_at is not null%'
               then 'OK' else 'FAIL' end
 
   union all

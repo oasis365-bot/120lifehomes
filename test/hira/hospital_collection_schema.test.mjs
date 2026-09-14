@@ -57,7 +57,7 @@ test('006 up: hospital_collection_jobs 필수 CHECK/인덱스 존재', () => {
     'hospital_collection_jobs_counts_nonneg_chk',
     'hospital_collection_jobs_job_chk',
     'hospital_collection_jobs_lease_owner_len_chk',
-    'hospital_collection_jobs_last_error_code_len_chk',
+    'hospital_collection_jobs_last_error_code_fmt_chk',
     'uq_hospital_collection_jobs_active_per_job',
     'idx_hospital_collection_jobs_job_status',
     'idx_hospital_collection_jobs_lease_expires',
@@ -77,10 +77,52 @@ test('006 up: job 은 free text 가 아니라 allowlist CHECK 로 고정됨(part
   assert.match(block, /check \(job in \('hira_hospital_nationwide'\)\)/);
 });
 
-test('006 up: lease_owner/last_error_code(jobs) 는 길이 상한 CHECK 를 가짐', () => {
+test('006 up: lease_owner(jobs) 는 길이 상한 CHECK 를 가짐', () => {
   const src = read(UP);
   assert.ok(src.includes('char_length(lease_owner) between 1 and 128'));
-  assert.ok(src.includes("check (last_error_code is null or char_length(last_error_code) between 1 and 64)"));
+});
+
+test('006 up: last_error_code 계약 — DB 는 slug 형식만 강제, "정확한 allowlist" 라고 표현하지 않음', () => {
+  const src = read(UP);
+  // 코드 CHECK 자체는 정규식 형식만(길이만 재는 예전 계약으로 되돌아가지 않았는지 확인).
+  const jobsChk = "check (last_error_code is null or last_error_code ~ '^[a-z0-9_]{1,64}$')";
+  const itemsChk = "check (last_error_code is null or last_error_code ~ '^[a-z0-9_]{1,64}$')";
+  assert.ok(src.includes(jobsChk), 'jobs last_error_code 가 slug 정규식 CHECK 아님');
+  assert.ok(src.includes(itemsChk), 'items last_error_code 가 slug 정규식 CHECK 아님');
+  // "DB 가 정확한 오류 코드 allowlist 를 구현한다" 는 잘못된 옛 표현이 없어야 함.
+  // (job 종류 allowlist — 실제로 DB CHECK 로 구현됨 — 는 별개이며 정당한 표현이므로 허용.)
+  assert.equal(/안전한 allowlist 오류 코드만/.test(src), false, '오류 코드 자체를 DB allowlist 라고 잘못 표기한 옛 문구가 남아있음');
+  // "정확한 ... allowlist 는 ... DB ... 범위 밖/책임" 처럼 DB 가 아니라 애플리케이션 책임임을
+  // 명시하는 문구가 last_error_code 근처에 있어야 함(오표기 방지 확인의 반대쪽 확인).
+  assert.ok(/allowlist[^\n]*(범위 밖|애플리케이션|후속 배치)/.test(src) || /(애플리케이션|후속 배치)[^\n]*allowlist/.test(src),
+    'last_error_code 의 정확한 allowlist 는 애플리케이션 계층 책임이라는 명시가 없음');
+});
+
+test('last_error_code 정규식(실제 migration 문자열에서 추출)이 요구된 값들을 정확히 거부/허용함', () => {
+  const src = read(UP);
+  // SQL 소스에서 실제 정규식 리터럴을 그대로 추출해 JS RegExp 로 재현 — SQL 을 하드코딩
+  // 재작성하지 않고 "진짜 migration 에 들어있는 패턴"을 검증한다.
+  const m = src.match(/last_error_code ~ '(\^\[a-z0-9_\]\{1,64\}\$)'/);
+  assert.ok(m, '정규식 리터럴을 소스에서 찾지 못함');
+  const re = new RegExp(m[1]);
+
+  const rejected = [
+    ' ',                       // 공백
+    'DEADLINE_EXCEEDED',       // 대문자
+    'http-429',                // 하이픈
+    'https://example.com',     // URL
+    'deadline_exceeded\nmore', // 줄바꿈
+    'a'.repeat(65),            // 65자 이상
+    '수집 중 알 수 없는 오류가 발생했습니다', // raw 오류 문장
+  ];
+  for (const v of rejected) {
+    assert.equal(re.test(v), false, `거부돼야 하는데 통과함: ${JSON.stringify(v)}`);
+  }
+
+  const accepted = ['deadline_exceeded', 'http_429', 'quota_exhausted'];
+  for (const v of accepted) {
+    assert.ok(re.test(v), `허용돼야 하는데 거부됨: ${JSON.stringify(v)}`);
+  }
 });
 
 test('006 up: 활성-작업 partial unique index 는 정확히 pending/running/paused_for_today 범위(터미널 상태 제외)', () => {
@@ -100,7 +142,7 @@ test('006 up: hospital_collection_items 필수 CHECK/UNIQUE/인덱스 존재', (
     'hospital_collection_items_ordinal_chk',
     'hospital_collection_items_facility_id_format_chk',
     'hospital_collection_items_facility_id_len_chk',
-    'hospital_collection_items_last_error_code_len_chk',
+    'hospital_collection_items_last_error_code_fmt_chk',
     'uq_hospital_collection_items_job_facility',
     'uq_hospital_collection_items_job_ordinal',
     'idx_hospital_collection_items_job_status_ordinal',
@@ -238,6 +280,21 @@ test('heartbeat/release: 현재 owner 일치 조건이 WHERE 절에 있음(임�
   }
 });
 
+test('heartbeat: owner 일치만으로는 부족 — lease_expires_at 이 NOT NULL 이고 아직 미래일 때만 성공(만료 lease 부활 차단)', () => {
+  const src = read(UP);
+  const at = src.indexOf('create or replace function public.hospital_collection_job_heartbeat(');
+  assert.ok(at > 0);
+  const block = src.slice(at, src.indexOf('\n$$;', at));
+  assert.ok(block.includes('and lease_owner = p_owner'), 'owner 일치 조건 없음');
+  assert.ok(block.includes('and lease_expires_at is not null'), 'lease_expires_at NOT NULL 조건 없음');
+  assert.ok(block.includes('and lease_expires_at > now()'), 'lease_expires_at 미래 조건 없음');
+  // WHERE 절이 owner 일치 → NOT NULL → 미래 순서로 AND 로 연결돼 있어야(단일 UPDATE, 셀렉트 후 판단 아님).
+  const whereAt = block.indexOf('where id = p_job_id');
+  assert.ok(whereAt > 0);
+  const whereBlock = block.slice(whereAt, block.indexOf(';', whereAt) + 1);
+  assert.match(whereBlock, /and lease_owner = p_owner\s*\n\s*and lease_expires_at is not null\s*\n\s*and lease_expires_at > now\(\);/);
+});
+
 test('release_lease: lease 해제와 상태 전이가 같은 UPDATE 문 안에서 원자적으로 처리됨', () => {
   const src = read(UP);
   const at = src.indexOf('create or replace function public.hospital_collection_job_release_lease(');
@@ -321,6 +378,9 @@ test('007 verify: 필수 검증 항목이 모두 존재(테이블/CHECK/UNIQUE/�
     'C16 신규 함수 service_role execute 권한 수', 'C17 schema_migrations 006 기록',
   ];
   for (const m of mustInclude) assert.ok(src.includes(m), `verify 에 "${m}" 항목 없음`);
+  // 이번 라운드에 추가한 검증(heartbeat 만료 차단, last_error_code slug 형식)도 존재해야 함.
+  assert.ok(src.includes('C13b heartbeat 만료 lease 부활 차단 조건 존재'));
+  assert.ok(src.includes('C5b last_error_code slug 정규식 CHECK'));
 });
 
 test('005 preflight: 신규 테이블/함수/제약 이름 충돌 및 필요한 역할 존재를 사전 확인', () => {
@@ -329,6 +389,11 @@ test('005 preflight: 신규 테이블/함수/제약 이름 충돌 및 필요한 
   assert.ok(src.includes('A5 신규 함수 기존재 개수'));
   assert.ok(src.includes('A6 제약·인덱스 이름 충돌'));
   assert.ok(src.includes('A8 anon/authenticated/service_role 역할 존재'));
+  // 오류 코드 계약 수정으로 이름이 바뀐 제약(len→fmt)이 최신 이름으로 반영돼 있는지.
+  assert.ok(src.includes('hospital_collection_jobs_last_error_code_fmt_chk'));
+  assert.ok(src.includes('hospital_collection_items_last_error_code_fmt_chk'));
+  assert.equal(src.includes('hospital_collection_jobs_last_error_code_len_chk'), false, '옛 제약명이 남아있음');
+  assert.equal(src.includes('hospital_collection_items_last_error_code_len_chk'), false, '옛 제약명이 남아있음');
 });
 
 test('schema.sql / baseline_schema.sql 은 이번 작업에서 수정하지 않음(001 선례와 동일하게 마이그레이션만 갱신)', () => {

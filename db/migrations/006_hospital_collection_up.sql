@@ -79,7 +79,11 @@ create table if not exists public.hospital_collection_jobs (
   lease_expires_at       timestamptz,
   heartbeat_at           timestamptz,
 
-  -- 안전한 allowlist 오류 코드만(원문 메시지·URL·기관정보 절대 금지). 예: 'deadline_exceeded'.
+  -- 안전한 코드값만(원문 메시지·URL·기관정보 절대 금지). 예: 'deadline_exceeded'.
+  -- ⚠️ DB 는 "안전한 slug 형식"(소문자 영문·숫자·underscore, 1~64자)만 강제한다.
+  --    정확한 오류 코드 allowlist(어떤 코드값들이 실제로 유효한가)는 여기서 강제하지
+  --    않는다 — 그 목록은 후속 배치 API(애플리케이션 계층)에서 강제한다. 코드값이
+  --    늘어날 때마다 이 DB migration 을 다시 열 필요가 없게 하기 위한 의도적 분리.
   last_error_code        text,
 
   started_at             timestamptz,
@@ -104,11 +108,13 @@ create table if not exists public.hospital_collection_jobs (
   -- job allowlist(현재 지원 종류 1개). 새 종류 추가는 별도 migration 에서 이 CHECK 를 확장.
   constraint hospital_collection_jobs_job_chk
     check (job in ('hira_hospital_nationwide')),
-  -- lease_owner/last_error_code 길이 상한(형식 오류·비정상 값 방어, 실제 값은 짧은 run-id/코드).
+  -- lease_owner 길이 상한(형식 오류·비정상 값 방어, 실제 값은 짧은 run-id).
   constraint hospital_collection_jobs_lease_owner_len_chk
     check (lease_owner is null or char_length(lease_owner) between 1 and 128),
-  constraint hospital_collection_jobs_last_error_code_len_chk
-    check (last_error_code is null or char_length(last_error_code) between 1 and 64)
+  -- last_error_code: 안전한 slug 형식만 강제(소문자·숫자·underscore, 1~64자).
+  -- 정확한 코드값 allowlist 는 이 DB 제약의 범위 밖(애플리케이션 계층 책임).
+  constraint hospital_collection_jobs_last_error_code_fmt_chk
+    check (last_error_code is null or last_error_code ~ '^[a-z0-9_]{1,64}$')
 );
 
 -- 같은 job 종류에서 "활성"(터미널이 아닌) 작업이 동시에 여러 개 생기지 않도록.
@@ -140,7 +146,9 @@ create table if not exists public.hospital_collection_items (
 
   status           text not null default 'pending',
   attempt_count    integer not null default 0,
-  -- 안전한 allowlist 오류 코드만(예: 'http_5xx','timeout'). 원문 오류 금지.
+  -- 안전한 코드값만(예: 'http_5xx','timeout'). 원문 오류 금지.
+  -- ⚠️ DB 는 slug 형식(소문자·숫자·underscore, 1~64자)만 강제 — 정확한 코드
+  --    allowlist 는 후속 애플리케이션 계층 책임(아래 CHECK 주석과 동일 원칙).
   last_error_code  text,
   next_retry_at    timestamptz,
 
@@ -161,8 +169,10 @@ create table if not exists public.hospital_collection_items (
   -- 길이 상한(비정상적으로 긴 값 방어). "H-"+ykiho 는 실측상 100자를 크게 넘지 않음.
   constraint hospital_collection_items_facility_id_len_chk
     check (char_length(facility_id) between 3 and 200),
-  constraint hospital_collection_items_last_error_code_len_chk
-    check (last_error_code is null or char_length(last_error_code) between 1 and 64),
+  -- last_error_code: 안전한 slug 형식만 강제(소문자·숫자·underscore, 1~64자).
+  -- 정확한 코드값 allowlist 는 이 DB 제약의 범위 밖(애플리케이션 계층 책임).
+  constraint hospital_collection_items_last_error_code_fmt_chk
+    check (last_error_code is null or last_error_code ~ '^[a-z0-9_]{1,64}$'),
   constraint uq_hospital_collection_items_job_facility unique (job_id, facility_id),
   constraint uq_hospital_collection_items_job_ordinal  unique (job_id, ordinal)
 );
@@ -240,8 +250,15 @@ begin
 end;
 $$;
 
--- 5-2. heartbeat/lease 연장: 현재 owner 가 정확히 일치할 때만 성공.
---   다른(또는 만료 후 새로 발급된) owner 의 lease 는 절대 연장하지 못한다.
+-- 5-2. heartbeat/lease 연장: 현재 owner 가 정확히 일치하고 lease 가 "아직 유효"할
+--   때만 성공한다. owner 만 확인하고 만료 여부를 안 보면, lease 가 만료됐지만
+--   다른 실행이 아직 회수(acquire)하지 않은 짧은 구간에 이전 실행이 heartbeat 를
+--   보내 만료된 자기 lease 를 부활시킬 수 있다 — 그 사이 다른 실행이 이미 같은
+--   job 을 진행 중일 수 있으므로 이는 곧 이중 실행이 된다. 만료된 lease 는 오직
+--   acquire_lease 로만(새 owner 가) 다시 획득할 수 있고, heartbeat 로는 절대
+--   "되살릴" 수 없다.
+--   계약: owner 일치 + lease_expires_at 이 NULL 이 아니고 아직 미래(> now()) 일
+--   때만 성공. owner 불일치·lease_expires_at NULL·이미 만료 → 전부 false.
 create or replace function public.hospital_collection_job_heartbeat(
   p_job_id uuid,
   p_owner text,
@@ -269,7 +286,9 @@ begin
          heartbeat_at     = now(),
          updated_at       = now()
    where id = p_job_id
-     and lease_owner = p_owner;
+     and lease_owner = p_owner
+     and lease_expires_at is not null
+     and lease_expires_at > now();
 
   get diagnostics v_rows = row_count;
   return v_rows > 0;
