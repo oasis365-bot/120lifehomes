@@ -119,7 +119,10 @@ export function createHandler(deps = {}) {
     }
 
     const secret = env.CRON_SECRET || '';
-    const bearer = (req.headers?.authorization || '').replace(/^Bearer\s+/i, '').trim();
+    // Bearer 스킴이 실제로 존재해야만 값을 추출한다 — 접두어가 없는 헤더(예: "Authorization: <secret>")를
+    // "접두어 없음 → 그대로 비교"로 잘못 통과시키지 않기 위해 매치 실패 시 빈 문자열로 처리한다(1B-5A).
+    const bearerMatch = /^Bearer\s+(.+)$/i.exec(req.headers?.authorization || '');
+    const bearer = bearerMatch ? bearerMatch[1].trim() : '';
     if (!secret || !safeEqual(bearer, secret)) {
       res.status(401).json({ error: 'unauthorized' });
       return;
