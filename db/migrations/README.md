@@ -136,3 +136,27 @@ select md5(string_agg(id, ',' order by id)) from public.facilities;
 ## 다음 (별도 승인 후)
 - `003_*` : `facilities.domain NOT NULL` 확정 (백필 검증 완료 후)
 - `004_*` : 실제 심평원 응답 샘플 확보 후 필드 매핑에 따른 컬럼/인덱스 보강 (1B)
+
+---
+
+## 005/006/007 — 전국 요양병원 수집 checkpoint/lease/일일 쿼터 스키마 (1B-5B)
+
+003/004 번호는 위 두 목적으로 이미 예약돼 있어 재사용하지 않고, 000→001→002 의 기존
+"preflight 번호 < 실제 migration 번호 < verify 번호" 패턴을 그대로 이어 005/006/007 을 썼다.
+
+| 순서 | 파일 | 성격 |
+|---|---|---|
+| 1 | `005_preflight.sql` | 읽기 전용 점검 (006 실행 전) |
+| 2 | `006_hospital_collection_up.sql` | 마이그레이션 (ADDITIVE, `begin; … commit;`) |
+| 3 | `007_verify.sql` | 읽기 전용 검증 (006 실행 후) |
+| (롤백) | `006_hospital_collection_down.sql` | 되돌리기 |
+
+이 migration 은 스키마와 원자적 DB 함수만 만든다(신규 테이블 3개: `hospital_collection_jobs`,
+`hospital_collection_items`, `hospital_hira_daily_usage` + lease/quota 함수 4개). 배치 API·
+GitHub Actions·HIRA 실호출·`hospital_module` 플래그·기존 001 스키마는 전혀 건드리지 않으며,
+이 migration 자체는 실제 데이터를 한 행도 넣지 않는다. `hospital_collection_items.facility_id`
+는 `facilities(id)` FK 를 의도적으로 걸지 않음(근거는 `006_hospital_collection_up.sql` 상단
+주석 및 PR 본문 참고) — enrichment 설계·공개 노출 정책이 정해진 뒤 별도 migration 에서 재검토.
+
+실행 순서·검증 기준은 000/001/002 와 동일한 방식(SQL Editor 붙여넣고 RUN, [A]/[C] verdict 표
+확인)이며, 상세 verdict 항목은 각 파일 자체의 주석을 참고.
