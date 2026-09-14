@@ -14,9 +14,9 @@ const auth = { authorization: `Bearer ${SECRET}` };
 // 테스트용 합성 hostname — 실제 프로젝트 ref 는 코드·테스트에 넣지 않는다.
 const ALLOWED_DB_HOST = 'preview-db-ref-test.supabase.co';
 const PREVIEW_URL = `https://${ALLOWED_DB_HOST}`;
-// ingest.js 쿼리 형태: readiness(목록만 dry-run) / 실 적재.
-const internalIngestQuery = (dryRun) =>
-  (dryRun ? { limit: '3', readiness: '1' } : { dryRun: 'false', limit: '3' });
+// ingest.js body 형태(1B-5A: JSON body 전용): readiness(목록만 dry-run) / 실 적재.
+const internalIngestBody = (dryRun) =>
+  (dryRun ? { limit: 3, readiness: true } : { dryRun: false, limit: 3 });
 const env = (e = {}) => ({
   CRON_SECRET: SECRET, DATA_GO_KR_KEY: 'k', VERCEL_ENV: 'preview',
   HOSPITAL_INGEST_PERSIST: '1', SUPABASE_URL: PREVIEW_URL, HOSPITAL_INGEST_DB_HOST: ALLOWED_DB_HOST, ...e,
@@ -27,7 +27,7 @@ const mkRes = () => ({
   json(b) { this.body = b; return this; },
   setHeader(k, v) { this.headers[k] = v; },
 });
-const mkReq = ({ headers = {}, query = {} } = {}) => ({ headers, query });
+const mkReq = ({ headers = {}, body = {}, method = 'POST' } = {}) => ({ headers, body, method });
 
 // 실제 collect — 단 retry backoff 는 즉시 (실 대기 없음)
 const fastCollect = (client, o) =>
@@ -48,7 +48,7 @@ const hospCount = (sb) => sb.tables.facilities.filter((f) => f.domain === 'HOSPI
 test('통합: collect 3 → ingest → persist → mockSb : new=3, HOSPITAL 3, 프로필/소스 3', async () => {
   const sb = makeMockSb();
   const res = mkRes();
-  await createHandler(realDeps(sb))(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+  await createHandler(realDeps(sb))(mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), res);
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.ok, true);
@@ -65,9 +65,9 @@ test('통합: collect 3 → ingest → persist → mockSb : new=3, HOSPITAL 3, �
 
 test('통합: 동일 재실행 → unchanged 3, new 0, facilities 3 유지 (추가 write 없음)', async () => {
   const sb = makeMockSb();
-  await createHandler(realDeps(sb))(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), mkRes());
+  await createHandler(realDeps(sb))(mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), mkRes());
   const res2 = mkRes();
-  await createHandler(realDeps(sb))(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res2);
+  await createHandler(realDeps(sb))(mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), res2);
 
   assert.equal(res2.statusCode, 200);
   assert.equal(res2.body.persisted.unchanged, 3);
@@ -80,10 +80,10 @@ test('통합: 동일 재실행 → unchanged 3, new 0, facilities 3 유지 (추�
 
 test('통합: 운영자 입력 컬럼은 재수집에도 보존', async () => {
   const sb = makeMockSb();
-  await createHandler(realDeps(sb))(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), mkRes());
+  await createHandler(realDeps(sb))(mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), mkRes());
   const f = sb.tables.facilities[0];
   f.monthly_fee = 1200; f.is_partner = true; f.intro = '운영자';
-  await createHandler(realDeps(sb))(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), mkRes());
+  await createHandler(realDeps(sb))(mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), mkRes());
   const f2 = sb.tables.facilities.find((x) => x.id === f.id);
   assert.equal(f2.monthly_fee, 1200);
   assert.equal(f2.is_partner, true);
@@ -100,7 +100,7 @@ test('통합: collect 가 2건만(기대 3) → 422 collect_count_mismatch, pers
   const res = mkRes();
   await createHandler(realDeps(sb, { listTotal: 2 }, {
     persist: async (...a) => { persistCalled = true; return persistCollected(...a); },
-  }))(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+  }))(mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), res);
 
   assert.equal(res.statusCode, 422);
   assert.equal(res.body.persistInputCount, 2);
@@ -115,7 +115,7 @@ test('통합: 3건 중 하나 기관명 누락 → persist 미호출, 모든 테
   // 목록 3건, 그 중 2번째 기관명(yadmNm) 없음 → 정규화 유효 2건
   await createHandler(realDeps(sb, { listTotal: 3, dropNameAt: 1 }, {
     persist: async (...a) => { persistCalled = true; return persistCollected(...a); },
-  }))(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+  }))(mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), res);
 
   assert.equal(res.statusCode, 422);
   assert.equal(res.body.error, 'collect_count_mismatch');
@@ -153,7 +153,7 @@ test('통합: collect 가 3건 반환하나 그 중 하나 name="" (2차 게이�
       warnings: [], failures: [], samples: [], meta: {},
     }),
     persist: async (...a) => { persistCalled = true; return persistCollected(...a); },
-  })(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+  })(mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), res);
 
   assert.equal(res.statusCode, 422);
   assert.equal(res.body.reason, 'required_fields_incomplete');
@@ -172,7 +172,7 @@ test('통합: 저장 결과 합계가 입력수와 불일치 → 500 persist_cou
   const res = mkRes();
   await createHandler(realDeps(sb, { listTotal: 3 }, {
     persist: async () => ({ runId: 9, status: 'ok', stats: { new: 1, updated: 0, unchanged: 0, partial: 0, failed: 0 }, failures: [] }),
-  }))(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+  }))(mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), res);
 
   assert.equal(res.statusCode, 500);
   assert.equal(res.body.error, 'persist_count_mismatch');
@@ -185,7 +185,7 @@ test('통합: HIRA 첫 수집 0건 → 재시도로 3건 → 정상 적재 new=3
   const sb = makeMockSb();
   const res = mkRes();
   await createHandler(realDeps(sb, { listTotal: 3, listEmptyFirst: 1 }))(
-    mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+    mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), res);
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.persisted.new, 3);
   assert.equal(res.body.stats.listRetries, 1);
@@ -198,7 +198,7 @@ test('통합: HIRA 목록 3회 모두 0건 → 502(transient_empty_page_exhauste
   const res = mkRes();
   await createHandler(realDeps(sb, { listTotal: 3, listEmptyFirst: 3 }, {
     persist: async (...a) => { persistCalled = true; return persistCollected(...a); },
-  }))(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+  }))(mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), res);
 
   assert.equal(res.statusCode, 502);
   assert.equal(res.body.reason, 'transient_empty_page_exhausted');
@@ -215,7 +215,7 @@ test('통합: HIRA 목록 3회 모두 0건 → 502(transient_empty_page_exhauste
 test('통합 dry-run: 목록 3회 모두 0건 → 502 collect_failed, ok 아님', async () => {
   const res = mkRes();
   await createHandler(realDeps(makeMockSb(), { listTotal: 3, listEmptyFirst: 3 }))(
-    mkReq({ headers: auth, query: { limit: '3' } }), res);
+    mkReq({ headers: auth, body: { limit: 3 } }), res);
   assert.equal(res.statusCode, 502);
   assert.notEqual(res.body.ok, true);
   assert.equal(res.body.reason, 'transient_empty_page_exhausted');
@@ -228,7 +228,7 @@ test('통합: 2차 수집 목록 throw 3회 → 502 ingest_failed(list_fetch_fai
   const res = mkRes();
   await createHandler(realDeps(sb, { listTotal: 3, listThrowFirst: 3, listThrowReason: 'gateway' }, {
     persist: async (...a) => { persistCalled = true; return persistCollected(...a); },
-  }))(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+  }))(mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), res);
 
   assert.equal(res.statusCode, 502);
   assert.equal(res.body.error, 'ingest_failed');
@@ -248,7 +248,7 @@ test('통합: 목록 throw → 502 응답에 failureKind/attemptSummary/elapsedB
     listTotal: 3, listThrowFirst: 3, listThrowReason: 'network',
     listThrowFailureKind: 'dns', listThrowAttemptSummary: { dns: 2, timeout: 1 },
     listThrowElapsedBucket: '5s_15s',
-  }))(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+  }))(mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), res);
 
   assert.equal(res.statusCode, 502);
   assert.equal(res.body.error, 'ingest_failed');
@@ -288,7 +288,7 @@ test('통합: 목록 회복은 client 계층에서 (첫 fetch 503 → 두 번째
   await createHandler({
     env: env(), createClient, collect: collectHospitals, persist: persistCollected,
     sbImpl: sb, assertDb: async () => ({ ok: true }),
-  })(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+  })(mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), res);
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.persisted.new, 3);
@@ -300,7 +300,7 @@ test('통합: 목록 비정상 resultCode(code 1, 비일시적) → 502 list_abn
   const sb = makeMockSb();
   const res = mkRes();
   await createHandler(realDeps(sb, { listTotal: 3, listAbnormalFirst: 1, listAbnormalCode: '1' }))(
-    mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+    mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), res);
   assert.equal(res.statusCode, 502);
   assert.equal(res.body.reason, 'list_abnormal_result');
   assert.equal(res.body.lastResultCode, '1');
@@ -317,7 +317,7 @@ test('통합: 상세 수집이 예산 초과(느린 HIRA) → 60s 전에 502 dea
   await createHandler({
     env: env(), createClient: () => c, collect: collectHospitals, persist: persistCollected,
     sbImpl: sb, assertDb: async () => ({ ok: true }), now,
-  })(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+  })(mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), res);
 
   assert.equal(res.statusCode, 502);
   assert.equal(res.body.reason, 'deadline_exceeded');
@@ -341,7 +341,7 @@ test('통합: 최악(모든 HIRA 호출 timeout, 실제 client) → 60s 전에 5
   await createHandler({
     env: env(), createClient, collect: collectHospitals, persist: persistCollected,
     sbImpl: sb, assertDb: async () => ({ ok: true }), now,
-  })(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+  })(mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), res);
 
   assert.equal(res.statusCode, 502);
   assert.ok(['list_fetch_failed', 'deadline_exceeded', 'deadline', 'timeout'].includes(res.body.reason), res.body.reason);
@@ -359,7 +359,7 @@ test('통합 dry-run: 예산 초과 → 502 (dry-run 도 동일 안전장치), D
   await createHandler({
     env: env(), createClient: () => c, collect: collectHospitals, persist: persistCollected,
     sbImpl: sb, assertDb: async () => ({ ok: true }), now,
-  })(mkReq({ headers: auth, query: { limit: '3' } }), res); // dryRun 기본 true
+  })(mkReq({ headers: auth, body: { limit: 3 } }), res); // dryRun 기본 true
 
   assert.equal(res.statusCode, 502);
   assert.notEqual(res.body.ok, true);
@@ -375,7 +375,7 @@ test('readiness dry-run: HIRA 호출이 목록 범위로 제한 (상세·평가 
   await createHandler({
     env: env(), createClient: () => c, collect: collectHospitals, persist: persistCollected,
     sbImpl: sb, assertDb: async () => ({ ok: true }),
-  })(mkReq({ headers: auth, query: internalIngestQuery(true) }), res);
+  })(mkReq({ headers: auth, body: internalIngestBody(true) }), res);
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.dryRun, true);
@@ -394,7 +394,7 @@ test('readiness dry-run: 목록이 3건 미만이면 502 (진행 불가), DB wri
   await createHandler({
     env: env(), createClient: () => c, collect: collectHospitals, persist: persistCollected,
     sbImpl: sb, assertDb: async () => ({ ok: true }),
-  })(mkReq({ headers: auth, query: internalIngestQuery(true) }), res);
+  })(mkReq({ headers: auth, body: internalIngestBody(true) }), res);
   assert.equal(res.statusCode, 502);
   assert.equal(res.body.reason, 'incomplete_collect');
   assert.equal(res.body.mode, 'readiness');
@@ -410,7 +410,7 @@ test('readiness 성공 후 ③ full collect(재수집 없이 그 결과 persist)
     return createHandler({
       env: env(), createClient: () => c, collect: collectHospitals, persist: persistCollected,
       sbImpl: sb, assertDb: async () => ({ ok: true }),
-    })(mkReq({ headers: auth, query: internalIngestQuery(dryRun) }), res).then(() => ({ res, calls: c.calls }));
+    })(mkReq({ headers: auth, body: internalIngestBody(dryRun) }), res).then(() => ({ res, calls: c.calls }));
   };
   const { res: r2 } = await run(true);
   assert.equal(r2.body.mode, 'readiness');
@@ -442,21 +442,21 @@ test('_normalizedAll 회귀: collect 반환값에 배열로 존재하고 ingest 
       seen = items;
       return { runId: 1, status: 'ok', stats: { new: 3, updated: 0, unchanged: 0, partial: 0, failed: 0 }, failures: [] };
     },
-  }))(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), mkRes());
+  }))(mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), mkRes());
   assert.equal(Array.isArray(seen), true);
   assert.equal(seen.length, 3);
 });
 
 test('dryRun=true 와 dryRun=false 는 같은 collect 결과 형태를 받는다 (_normalizedAll 만 응답에서 제거)', async () => {
   const dry = mkRes();
-  await createHandler(realDeps(makeMockSb(), { listTotal: 3 }))(mkReq({ headers: auth, query: { limit: '3' } }), dry);
+  await createHandler(realDeps(makeMockSb(), { listTotal: 3 }))(mkReq({ headers: auth, body: { limit: 3 } }), dry);
   assert.equal(dry.body.dryRun, true);
   assert.equal(dry.body.dbWrites, 0);
   assert.equal(dry.body.stats.normalized, 3);
   assert.equal(dry.body._normalizedAll, undefined); // 응답 미포함
 
   const wet = mkRes();
-  await createHandler(realDeps(makeMockSb(), { listTotal: 3 }))(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), wet);
+  await createHandler(realDeps(makeMockSb(), { listTotal: 3 }))(mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), wet);
   assert.equal(wet.body.dryRun, false);
   assert.equal(wet.body.normalizedCount, 3);
   assert.equal(wet.body._normalizedAll, undefined);
@@ -486,7 +486,7 @@ test('persistCollected 정상 1건 → status ok (회귀: 합계검증이 정상
 async function runIngest(sb, clientOpt, limit = 3) {
   const res = mkRes();
   await createHandler(realDeps(sb, clientOpt))(
-    mkReq({ headers: auth, query: { dryRun: 'false', limit: String(limit) } }), res);
+    mkReq({ headers: auth, body: { dryRun: false, limit } }), res);
   return res;
 }
 
@@ -541,7 +541,7 @@ test('통합: 부분수집 상태에서 ingestion_runs status=partial, 응답에
   const sb = makeMockSb();
   const res = mkRes();
   await createHandler(realDeps(sb, { listTotal: 3, failSteps: new Set(['equipment']) }))(
-    mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+    mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), res);
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.persistStatus, 'partial');
   assert.equal(res.body.persisted.new, 3);
@@ -586,7 +586,7 @@ test('통합: 부분수집 재실행 멱등 (2회차 profile write 0), 이후 �
 test('통합: 신규 기관도 일부 상세 endpoint 실패 시 가용 정보로 저장 (실패 필드는 null), 고아행 없음', async () => {
   const sb = makeMockSb();
   await createHandler(realDeps(sb, { listTotal: 3, failSteps: new Set(['equipment', 'facility']) }))(
-    mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), mkRes());
+    mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), mkRes());
   assert.equal(sb.tables.facilities.filter((f) => f.domain === 'HOSPITAL').length, 3);
   assert.equal(sb.tables.hospital_profiles.length, 3);
   for (const p of sb.tables.hospital_profiles) {
@@ -604,7 +604,7 @@ test('통합: 신규 기관도 일부 상세 endpoint 실패 시 가용 정보�
 test('통합 응답에 ykiho 원문·serviceKey·URL 없음', async () => {
   const sb = makeMockSb();
   const res = mkRes();
-  await createHandler(realDeps(sb))(mkReq({ headers: auth, query: { dryRun: 'false', limit: '3' } }), res);
+  await createHandler(realDeps(sb))(mkReq({ headers: auth, body: { dryRun: false, limit: 3 } }), res);
   const blob = JSON.stringify(res.body);
   assert.equal(/serviceKey|supabase\.co|JDQ4[A-Za-z0-9+/]{16,}/.test(blob), false);
 });

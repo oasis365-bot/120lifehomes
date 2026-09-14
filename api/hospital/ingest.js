@@ -1,10 +1,15 @@
 // =====================================================================
-// GET /api/hospital/ingest — 요양병원 수집 (dry-run) + Preview 소량 실 적재
+// POST /api/hospital/ingest — 요양병원 수집 (dry-run) + Preview 소량 실 적재
 // =====================================================================
-//  · production(VERCEL_ENV=production) → 404
-//  · CRON_SECRET Bearer 인증 필수 (timingSafeEqual). 없거나 틀리면 401.
+//  · production(VERCEL_ENV=production) → 404. 메서드·인증·입력과 무관하게 최우선(1B-5A).
+//  · POST 전용(1B-5A). 다른 메서드는 405 + Allow: POST, DB/HIRA 호출 0.
+//  · 인증은 Authorization: Bearer <CRON_SECRET> 만 인정(timingSafeEqual). 없거나 틀리면 401.
+//    쿼리 ?secret= 는 더 이상 인증으로 인정하지 않는다(1B-5A 로 폐지).
+//  · 실행 입력은 JSON body 로만 받는다(1B-5A). req.query 는 실행 제어에 쓰지 않는다.
+//      { "dryRun": boolean, "limit": number, "readiness": boolean }  (전부 선택, 미지정 시 기본값)
+//    타입이 다르면(문자열/배열/객체/NaN 등) 400 invalid_body, DB/HIRA 호출 0.
 //  · 기본 dryRun=true : HIRA 수집 → 정규화 → 통계·경고·샘플3. DB write 0.
-//    ?readiness=1 : 목록만 수집(listOnly). 상세·평가 미호출. DB write 0.
+//    readiness=true : 목록만 수집(listOnly). 상세·평가 미호출. DB write 0. (dryRun=false 와는 무관·무시)
 //  · dryRun=false (실 적재) — 아래 전부 통과해야 write:
 //      - HOSPITAL_INGEST_PERSIST = '1'                         (아니면 501)
 //      - HOSPITAL_INGEST_DB_HOST 에 지정된 hostname 과 SUPABASE_URL 정확 일치
@@ -14,12 +19,6 @@
 //        갖췄을 때만 persist. 하나라도 미달이면 persist 미호출 + 422 (부분 저장 없음).
 //  · DATA_GO_KR_KEY / CRON_SECRET / DB URL·ref / ykiho 원문 을 응답·로그에 출력하지 않음.
 //    HIRA 실패 원인은 allowlist(failureKind/attemptSummary/elapsedBucket)로만.
-//
-//  쿼리:
-//    ?limit=<1..3>    수집 기관 수 (기본 3, 상한 3)
-//    ?dryRun=false    실 적재 (위 조건 필요)
-//    ?readiness=1     목록만 dry-run
-//    ?secret=         (Bearer 대신 호환용)
 // =====================================================================
 import { timingSafeEqual } from 'node:crypto';
 import { createHiraClient, HiraError } from '../../lib/hira/client.js';
@@ -49,6 +48,46 @@ function safeEqual(a, b) {
 const scrubToken = (s) => String(s).replace(/[A-Za-z0-9+/]{40,}={0,2}/g, '***');
 
 /**
+ * JSON body 계약 검증(1B-5A). 쿼리스트링은 절대 참조하지 않는다.
+ *  · body 미전송(undefined) → {} 로 취급(전부 기본값).
+ *  · null / 배열 / object 가 아닌 타입 → invalid.
+ *  · dryRun/readiness: 존재하면 boolean 만 허용.
+ *  · limit: 존재하면 양의 정수만 허용(상한 clamp 은 호출부에서). 문자열·NaN·0·음수·배열·객체는 invalid.
+ *  · 알려지지 않은 필드는 무시(기존 API 관례 — 미인식 파라미터는 무시).
+ * @param {unknown} body
+ * @returns {{ok:true, value:{dryRun:boolean, limit:number, readiness:boolean}}|{ok:false, reason:string}}
+ */
+function parseIngestBody(body) {
+  const b = body === undefined ? {} : body;
+  if (b === null || Array.isArray(b) || typeof b !== 'object') {
+    return { ok: false, reason: 'body_must_be_object' };
+  }
+
+  let dryRun = true;
+  if (Object.prototype.hasOwnProperty.call(b, 'dryRun')) {
+    if (typeof b.dryRun !== 'boolean') return { ok: false, reason: 'dryRun_must_be_boolean' };
+    dryRun = b.dryRun;
+  }
+
+  let limit = LIMIT_MAX;
+  if (Object.prototype.hasOwnProperty.call(b, 'limit')) {
+    const v = b.limit;
+    if (typeof v !== 'number' || !Number.isInteger(v) || v <= 0) {
+      return { ok: false, reason: 'limit_must_be_positive_integer' };
+    }
+    limit = v;
+  }
+
+  let readiness = false;
+  if (Object.prototype.hasOwnProperty.call(b, 'readiness')) {
+    if (typeof b.readiness !== 'boolean') return { ok: false, reason: 'readiness_must_be_boolean' };
+    readiness = b.readiness;
+  }
+
+  return { ok: true, value: { dryRun, limit, readiness } };
+}
+
+/**
  * @param {Object} deps
  * @param {typeof createHiraClient} [deps.createClient]
  * @param {typeof collectHospitals} [deps.collect]
@@ -72,18 +111,33 @@ export function createHandler(deps = {}) {
       return;
     }
 
+    const method = String(req.method || 'GET').toUpperCase();
+    if (method !== 'POST') {
+      res.setHeader?.('Allow', 'POST');
+      res.status(405).json({ error: 'method_not_allowed' });
+      return;
+    }
+
     const secret = env.CRON_SECRET || '';
-    const bearer = (req.headers?.authorization || '').replace(/^Bearer\s+/i, '').trim();
-    const qsecret = req.query && typeof req.query.secret === 'string' ? req.query.secret : '';
-    if (!secret || !safeEqual(bearer || qsecret, secret)) {
+    // Bearer 스킴이 실제로 존재해야만 값을 추출한다 — 접두어가 없는 헤더(예: "Authorization: <secret>")를
+    // "접두어 없음 → 그대로 비교"로 잘못 통과시키지 않기 위해 매치 실패 시 빈 문자열로 처리한다(1B-5A).
+    const bearerMatch = /^Bearer\s+(.+)$/i.exec(req.headers?.authorization || '');
+    const bearer = bearerMatch ? bearerMatch[1].trim() : '';
+    if (!secret || !safeEqual(bearer, secret)) {
       res.status(401).json({ error: 'unauthorized' });
       return;
     }
 
     res.setHeader?.('Cache-Control', 'no-store');
-    const q = req.query || {};
-    const wantPersist = String(q.dryRun) === 'false';
-    const limit = Math.min(Math.max(parseInt(q.limit, 10) || LIMIT_MAX, 1), LIMIT_MAX);
+
+    const parsedBody = parseIngestBody(req.body);
+    if (!parsedBody.ok) {
+      res.status(400).json({ error: 'invalid_body', reason: parsedBody.reason });
+      return;
+    }
+    const wantPersist = parsedBody.value.dryRun === false;
+    const limit = Math.min(parsedBody.value.limit, LIMIT_MAX);
+    const readiness = parsedBody.value.readiness === true;
 
     // ── dryRun=false (실 적재) ────────────────────────────────────────
     if (wantPersist) {
@@ -228,9 +282,7 @@ export function createHandler(deps = {}) {
       return;
     }
 
-    // readiness: HIRA 목록만 호출해 3건 확보·기본검증 (상세 6종·평가 미호출). DB write 0.
-    const readiness = String(q.readiness) === '1' || String(q.mode) === 'readiness';
-
+    // readiness(body): HIRA 목록만 호출해 3건 확보·기본검증 (상세 6종·평가 미호출). DB write 0.
     try {
       // dry-run 도 실 적재와 동일한 시간 안전장치.
       const deadlineMs = now() + COLLECT_BUDGET_MS;
