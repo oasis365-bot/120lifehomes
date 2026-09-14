@@ -36,8 +36,17 @@ test('1B-3A: api/hospital/ingest.js 는 HOSPITAL_INGEST_PERSIST 게이트 뒤에
   assert.ok(src.includes("env.HOSPITAL_INGEST_PERSIST !== '1'"), 'persist 게이트 없음');
   assert.ok(src.includes('persist_disabled'), '비활성 응답 없음');
   assert.ok(src.includes('assertPreviewDb') || src.includes('assertDb'), '운영 DB 안전점검 없음');
-  // dryRun 기본 true (dryRun=false 만 persist 경로)
-  assert.ok(src.includes("String(q.dryRun) === 'false'"));
+  // dryRun 기본 true (dryRun=false 만 persist 경로) — 1B-5A: JSON body 계약으로 변경
+  assert.ok(src.includes('parsedBody.value.dryRun === false'));
+});
+
+test('1B-5A: api/hospital/ingest.js 는 POST 전용 + JSON body 전용, query 를 실행에 쓰지 않는다', () => {
+  const src = read('api/hospital/ingest.js');
+  const code = src.replace(/\/\/.*$/gm, ''); // 주석 제외
+  assert.ok(code.includes("method !== 'POST'"), 'POST 전용 게이트 없음');
+  assert.ok(code.includes("'method_not_allowed'"), '405 응답 없음');
+  assert.equal(/req\.query/.test(code), false, '실행 코드가 req.query 를 참조함');
+  assert.equal(code.includes('req.query.secret'), false, 'query secret 인증이 남아있음');
 });
 
 test('1B-3B 안전: persist.js 는 hostname 을 정확 일치(===)로만 비교, 허용 host 는 env 로만', () => {
