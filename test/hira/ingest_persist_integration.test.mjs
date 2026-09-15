@@ -1,8 +1,8 @@
-// 통합: collect(mock HIRA) → api/hospital/ingest.js(dryRun=false) → lib/hira/persist.js → mockSb
+// 통합: collect(mock HIRA) → 병원 ingest 구현(dryRun=false) → lib/hira/persist.js → mockSb
 // 1B-3B "시설 0건" 사고(_normalizedAll 유실 / 빈 수집이 status=ok) 회귀 고정.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHandler } from '../../api/hospital/ingest.js';
+import { createHandler } from '../../lib/api/hospital_ingest.js';
 import { collectHospitals } from '../../lib/hira/collect.js';
 import { createHiraClient } from '../../lib/hira/client.js';
 import { persistCollected } from '../../lib/hira/persist.js';

@@ -102,6 +102,73 @@ test('4c. HTTP 500 / 429 → 재시도', async () => {
   assert.equal(ff.calls.length, 3);
 });
 
+test('4d. beforeAttempt 는 실제 재시도마다 fetch 직전에 호출된다', async () => {
+  const responses = [
+    { status: 500, text: 'err' },
+    { status: 429, text: 'slow down' },
+    { status: 200, text: fx('hospBasisList_one.json') },
+  ];
+  const ff = fakeFetch(responses);
+  const seen = [];
+  const c = createHiraClient({
+    key: 'k', fetchImpl: ff, sleepImpl: fakeSleep(), minIntervalMs: 0,
+    beforeAttempt: async (info) => { seen.push(info); return true; },
+  });
+  await c.listHospitals({ numOfRows: 1 });
+  assert.deepEqual(seen.map((x) => x.attempt), [1, 2, 3]);
+  assert.ok(seen.every((x) => x.op === HIRA_ENDPOINTS.hospBasis.op));
+  assert.equal(ff.calls.length, 3);
+});
+
+test('4e. beforeAttempt=false 면 fetch 0회, quota_exhausted 로 즉시 중단', async () => {
+  const ff = fakeFetch([{ status: 200, text: fx('hospBasisList_one.json') }]);
+  const c = createHiraClient({
+    key: 'k', fetchImpl: ff, sleepImpl: fakeSleep(), minIntervalMs: 0,
+    beforeAttempt: async () => false,
+  });
+  await assert.rejects(
+    () => c.listHospitals({ numOfRows: 1 }),
+    (e) => e instanceof HiraError && e.reason === 'quota' &&
+      e.failureKind === 'quota_exhausted' && e.attempts === 0,
+  );
+  assert.equal(ff.calls.length, 0);
+});
+
+test('4f. beforeAttempt 저장소 오류는 quota 소진과 구분하고 fetch하지 않는다', async () => {
+  const ff = fakeFetch([{ status: 200, text: fx('hospBasisList_one.json') }]);
+  const c = createHiraClient({
+    key: 'k', fetchImpl: ff, sleepImpl: fakeSleep(), minIntervalMs: 0,
+    beforeAttempt: async () => { throw new Error('db unavailable https://internal.invalid'); },
+  });
+  await assert.rejects(
+    () => c.listHospitals({ numOfRows: 1 }),
+    (e) => e instanceof HiraError && e.reason === 'quota_guard' &&
+      e.failureKind === 'quota_reservation_failed' && e.attempts === 0 &&
+      !String(e.message).includes('internal.invalid'),
+  );
+  assert.equal(ff.calls.length, 0);
+});
+
+test('beforeAttempt가 deadline을 소진하면 예약 후 fetch 없이 deadline 오류로 종료한다', async () => {
+  let clock = 0;
+  let reservations = 0;
+  let fetches = 0;
+  const c = createHiraClient({
+    key: 'k',
+    now: () => clock,
+    deadlineMs: 2_000,
+    minIntervalMs: 0,
+    beforeAttempt: async () => { reservations += 1; clock = 1_100; return true; },
+    fetchImpl: async () => { fetches += 1; throw new Error('must_not_fetch'); },
+  });
+  await assert.rejects(
+    () => c.listHospitals(),
+    (e) => e instanceof HiraError && e.reason === 'deadline' && e.failureKind === 'deadline',
+  );
+  assert.equal(reservations, 1);
+  assert.equal(fetches, 0);
+});
+
 test('5. 최대 재시도 후 중단 → HiraError', async () => {
   const responses = [
     { status: 200, text: RAW.JSON_GATEWAY_12 },
