@@ -410,7 +410,7 @@ test('schema.sql / baseline_schema.sql 은 이번 작업에서 수정하지 않�
 
 test('LTC·기존 hospital 스키마/코드 무변경 (이번 브랜치는 db/migrations/005·006·007 + 테스트만)', () => {
   for (const f of ['api/facilities.js', 'api/facility.js', 'api/ingest.js', 'api/enrich.js', 'api/consult.js',
-                    'api/hospital/facility.js', 'api/hospital/facilities.js', 'api/hospital/ingest.js', 'lib/db.js']) {
+                    'api/hospital/facility.js', 'api/hospital/facilities.js', 'lib/api/hospital_ingest.js', 'lib/db.js']) {
     const src = read(f);
     assert.equal(/hospital_collection_jobs|hospital_collection_items|hospital_hira_daily_usage/.test(src), false,
       `${f} 가 이번 신규 테이블을 참조함(범위 밖 — 배치 API 는 별도 작업)`);

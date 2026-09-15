@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHandler } from '../../api/hospital/batch.js';
+import { createHandler } from '../../lib/api/hospital_batch.js';
 
 const SECRET = 'test-batch-secret-123';
 const env = (extra = {}) => ({
@@ -126,7 +126,7 @@ test('내부 예외 메시지·URL·키는 응답에 노출하지 않는다', as
 
 test('정적 계약: query 인증/제어 없음, 기존 3건 ingest와 LTC 파일을 import하지 않음', async () => {
   const { readFile } = await import('node:fs/promises');
-  const src = await readFile(new URL('../../api/hospital/batch.js', import.meta.url), 'utf8');
+  const src = await readFile(new URL('../../lib/api/hospital_batch.js', import.meta.url), 'utf8');
   const code = src.replace(/^\s*\/\/.*$/gm, '');
   assert.doesNotMatch(code, /req\.query|\?secret=|api\/hospital\/ingest/);
   assert.doesNotMatch(src, /api\/facilities|api\/ingest|api\/enrich/);

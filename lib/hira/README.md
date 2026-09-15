@@ -10,7 +10,7 @@
 | `collect.js` | 오케스트레이터. clCd=28 목록 페이징 → ykiho 중복제거 → 기관별 상세 6종+평가 → 정규화. 부분 실패 허용, 실패 기관 재처리 목록. **최대 20곳 (하드캡).** `listOnly` 모드(목록만). DB 미접근. |
 | `persist.js` (1B-3) | `_normalizedAll` → `facilities`/`hospital_profiles`/`facility_evaluations`/`facility_sources`/`ingestion_runs` upsert. 운영자 입력 컬럼 미변경, `facility_revisions` 로 검수값 보호. `normalized_hash` 로 unchanged 판정. `assertPreviewDb`/`verifyPreviewDbUrl` 로 목적지 DB 검증(fail-closed). |
 
-호출부: `api/hospital/ingest.js` (Preview 전용, production 404, CRON_SECRET Bearer, dryRun 기본 true).
+호출부: `lib/api/hospital_ingest.js` (단일 Vercel 라우터가 `/api/hospital/ingest`로 연결; Preview 전용, production 404, CRON_SECRET Bearer, dryRun 기본 true).
 실 적재(`dryRun=false`)는 `HOSPITAL_INGEST_PERSIST=1` **및** `HOSPITAL_INGEST_DB_HOST=<허용 hostname>` 이 둘 다 설정돼야 하고(미설정이면 fail-closed), `hospital_module=false`·LTC 행 0·001 스키마 확인을 통과해야 한다. — 별도 승인 후에만.
 
 ## 현행 endpoint (1B-1 실측)

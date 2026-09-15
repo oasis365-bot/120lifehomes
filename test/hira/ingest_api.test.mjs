@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHandler } from '../../api/hospital/ingest.js';
+import { createHandler } from '../../lib/api/hospital_ingest.js';
 import { collectHospitals } from '../../lib/hira/collect.js';
 import { makeMockClient } from './mockClient.mjs';
 import { makeMockSb } from './mockSb.mjs';
@@ -420,14 +420,14 @@ test('HIRA 목록 첫 페이지부터 실패 → dry-run 도 성공 아님 (502 
 // ── 정적 계약 고정: query 를 실행에 쓰지 않는다 / production 가드 우선순위 ──────
 test('28(정적). ingest.js 는 req.query 를 실행 제어에 쓰지 않는다', async () => {
   const fs = await import('node:fs');
-  const src = fs.readFileSync(new URL('../../api/hospital/ingest.js', import.meta.url), 'utf8');
+  const src = fs.readFileSync(new URL('../../lib/api/hospital_ingest.js', import.meta.url), 'utf8');
   assert.equal(/req\.query/.test(src.replace(/\/\/.*$/gm, '')), false, '주석 제외 실코드에 req.query 남아있음');
   assert.equal(src.includes("req.query.secret"), false);
 });
 
 test('29(정적). production 가드가 method/인증/DB/HIRA 처리보다 먼저 나온다', async () => {
   const fs = await import('node:fs');
-  const src = fs.readFileSync(new URL('../../api/hospital/ingest.js', import.meta.url), 'utf8');
+  const src = fs.readFileSync(new URL('../../lib/api/hospital_ingest.js', import.meta.url), 'utf8');
   const iProd = src.indexOf("env.VERCEL_ENV === 'production'");
   const iMethod = src.indexOf("method !== 'POST'");
   const iAuth = src.indexOf('safeEqual(bearer, secret)');

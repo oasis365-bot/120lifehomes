@@ -31,8 +31,8 @@ test('lib/hira 모듈은 lib/db 를 import 하지 않는다 (persist 는 sb 주�
   }
 });
 
-test('1B-3A: api/hospital/ingest.js 는 HOSPITAL_INGEST_PERSIST 게이트 뒤에서만 persist', () => {
-  const src = read('api/hospital/ingest.js');
+test('1B-3A: 병원 ingest 구현은 HOSPITAL_INGEST_PERSIST 게이트 뒤에서만 persist', () => {
+  const src = read('lib/api/hospital_ingest.js');
   assert.ok(src.includes("env.HOSPITAL_INGEST_PERSIST !== '1'"), 'persist 게이트 없음');
   assert.ok(src.includes('persist_disabled'), '비활성 응답 없음');
   assert.ok(src.includes('assertPreviewDb') || src.includes('assertDb'), '운영 DB 안전점검 없음');
@@ -40,8 +40,8 @@ test('1B-3A: api/hospital/ingest.js 는 HOSPITAL_INGEST_PERSIST 게이트 뒤에
   assert.ok(src.includes('parsedBody.value.dryRun === false'));
 });
 
-test('1B-5A: api/hospital/ingest.js 는 POST 전용 + JSON body 전용, query 를 실행에 쓰지 않는다', () => {
-  const src = read('api/hospital/ingest.js');
+test('1B-5A: 병원 ingest 구현은 POST 전용 + JSON body 전용, query 를 실행에 쓰지 않는다', () => {
+  const src = read('lib/api/hospital_ingest.js');
   const code = src.replace(/\/\/.*$/gm, ''); // 주석 제외
   assert.ok(code.includes("method !== 'POST'"), 'POST 전용 게이트 없음');
   assert.ok(code.includes("'method_not_allowed'"), '405 응답 없음');
