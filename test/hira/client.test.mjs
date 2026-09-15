@@ -149,6 +149,26 @@ test('4f. beforeAttempt 저장소 오류는 quota 소진과 구분하고 fetch�
   assert.equal(ff.calls.length, 0);
 });
 
+test('beforeAttempt가 deadline을 소진하면 예약 후 fetch 없이 deadline 오류로 종료한다', async () => {
+  let clock = 0;
+  let reservations = 0;
+  let fetches = 0;
+  const c = createHiraClient({
+    key: 'k',
+    now: () => clock,
+    deadlineMs: 2_000,
+    minIntervalMs: 0,
+    beforeAttempt: async () => { reservations += 1; clock = 1_100; return true; },
+    fetchImpl: async () => { fetches += 1; throw new Error('must_not_fetch'); },
+  });
+  await assert.rejects(
+    () => c.listHospitals(),
+    (e) => e instanceof HiraError && e.reason === 'deadline' && e.failureKind === 'deadline',
+  );
+  assert.equal(reservations, 1);
+  assert.equal(fetches, 0);
+});
+
 test('5. 최대 재시도 후 중단 → HiraError', async () => {
   const responses = [
     { status: 200, text: RAW.JSON_GATEWAY_12 },

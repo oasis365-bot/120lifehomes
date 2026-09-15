@@ -180,6 +180,52 @@ test('lease 충돌이면 HIRA client 생성·호출 없이 busy 성공', async (
   assert.equal(db.calls.some((x) => x.path.includes('reserve_daily_calls')), false);
 });
 
+test('paused_for_today가 같은 KST 날짜이거나 미래이면 lease/quota/client 없이 유지한다', async () => {
+  const now = Date.parse('2026-09-14T10:00:00Z'); // KST 2026-09-14 19:00
+  for (const updated_at of ['2026-09-14T00:00:00Z', '2026-09-14T10:00:01Z']) {
+    const db = makeDb({ jobs: [{ ...baseJob(), status: 'paused_for_today', updated_at }] });
+    let created = 0;
+    const out = await runDiscoveryPage({
+      sb: db.sb, createClient: () => { created += 1; throw new Error('must_not_call'); },
+      key: 'secret', uuid: () => 'owner-paused', now: () => now,
+    });
+    assert.deepEqual(out, { ok: true, status: 'paused_for_today', didWork: false, phase: 'discovery' });
+    assert.equal(created, 0);
+    assert.equal(db.calls.some((x) => x.path.startsWith('rpc/')), false);
+  }
+});
+
+test('paused_for_today는 KST 자정이 지나면 기존 discovery cursor부터 재개한다', async () => {
+  const db = makeDb({ jobs: [{
+    ...baseJob(), status: 'paused_for_today', discovery_page: 3,
+    updated_at: '2026-09-14T14:59:59Z', // KST 2026-09-14 23:59:59
+  }] });
+  const seen = {};
+  const out = await runDiscoveryPage({
+    sb: db.sb, createClient: fakeClient(page({ pageNo: 4, totalCount: 500 }), seen),
+    key: 'secret', uuid: () => 'owner-resume', now: () => Date.parse('2026-09-14T15:00:00Z'),
+  });
+  assert.equal(out.status, 'page_complete');
+  assert.equal(out.page, 4);
+  assert.equal(db.jobs[0].discovery_page, 4);
+  assert.equal(seen.args.pageNo, 4);
+  assert.equal(db.calls.filter((x) => x.path.includes('reserve_daily_calls')).length, 1);
+});
+
+test('paused_for_today의 updated_at 누락/invalid는 lease/quota/client 없이 fail-closed한다', async () => {
+  for (const updated_at of [undefined, 'not-a-date']) {
+    const db = makeDb({ jobs: [{ ...baseJob(), status: 'paused_for_today', updated_at }] });
+    let created = 0;
+    const out = await runDiscoveryPage({
+      sb: db.sb, createClient: () => { created += 1; throw new Error('must_not_call'); },
+      key: 'secret', uuid: () => 'owner-invalid-date', now: () => Date.parse('2026-09-15T00:00:00Z'),
+    });
+    assert.equal(out.status, 'paused_for_today');
+    assert.equal(created, 0);
+    assert.equal(db.calls.some((x) => x.path.startsWith('rpc/')), false);
+  }
+});
+
 test('job 생성 race(23505)는 승자의 active job을 재조회해 계속한다', async () => {
   const db = makeDb({ conflictOnce: true });
   const out = await runDiscoveryPage({
