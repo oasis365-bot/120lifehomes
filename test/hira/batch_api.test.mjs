@@ -115,6 +115,24 @@ test('batch 결과도 whitelist로 재구성해 내부 필드를 버린다', asy
   assert.doesNotMatch(JSON.stringify(out.payload), /RAW|internal|secret|ykiho|url/i);
 });
 
+test('discovery 완료 뒤에는 같은 안전한 실행 계약으로 enrichment 1건을 호출한다', async () => {
+  let enrichCalls = 0;
+  const out = res();
+  const h = createHandler({
+    env: env(), sbImpl: async () => ({ data: [] }), assertDb: async () => ({ ok: true }),
+    runDiscovery: async () => ({ ok: true, status: 'phase_complete', didWork: false, phase: 'enrichment' }),
+    runEnrichment: async (arg) => {
+      enrichCalls += 1;
+      assert.equal(arg.key, 'test-hira-key');
+      return { ok: true, status: 'item_complete', didWork: true, phase: 'enrichment', ykiho: 'never-return' };
+    },
+    createClient: () => ({}), now: () => 1_000, uuid: () => 'owner',
+  });
+  await h(req(), out);
+  assert.equal(enrichCalls, 1);
+  assert.deepEqual(out.payload, { ok: true, status: 'item_complete', didWork: true, phase: 'enrichment' });
+});
+
 test('내부 예외 메시지·URL·키는 응답에 노출하지 않는다', async () => {
   const { out } = await invoke({
     run: async () => { throw new Error('https://secret.supabase.co serviceKey=VERY_SECRET'); },

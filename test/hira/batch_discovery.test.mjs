@@ -8,6 +8,7 @@ import {
 function makeDb(seed = {}) {
   const jobs = structuredClone(seed.jobs || []);
   const items = structuredClone(seed.items || []);
+  const sources = structuredClone(seed.sources || []);
   const calls = [];
   const rpc = { acquire: seed.acquire ?? true, reserve: seed.reserve ?? true, release: seed.release ?? true };
   let conflictOnce = seed.conflictOnce === true;
@@ -40,6 +41,14 @@ function makeDb(seed = {}) {
       }
       return { data: null };
     }
+    if (path.startsWith('facility_sources?on_conflict=') && method === 'POST') {
+      for (const row of opt.body) {
+        const at = sources.findIndex((x) => x.source_system === row.source_system && x.external_id === row.external_id);
+        if (at >= 0) sources[at] = { ...sources[at], ...row };
+        else sources.push({ ...row });
+      }
+      return { data: null };
+    }
     if (path.startsWith('hospital_collection_jobs?id=') && method === 'PATCH') {
       const row = jobs[0] || jobs.find((x) => path.includes(encodeURIComponent(x.id)));
       if (row) Object.assign(row, opt.body);
@@ -47,7 +56,7 @@ function makeDb(seed = {}) {
     }
     throw new Error(`unexpected_db_call:${method}:${path}`);
   };
-  return { sb, jobs, items, calls, rpc };
+  return { sb, jobs, items, sources, calls, rpc };
 }
 
 function page({ pageNo = 1, totalCount = 150, items = [{ ykiho: 'A' }, { ykiho: 'B' }] } = {}) {
@@ -89,13 +98,21 @@ test('새 job 생성 후 정확히 한 페이지를 snapshot items에 저장하�
   assert.equal(db.jobs[0].discovery_page, 1);
   assert.deepEqual(db.items.map((x) => x.facility_id), ['H-A', 'H-B']);
   assert.deepEqual(db.items.map((x) => x.ordinal), [0, 1]);
+  assert.equal(db.sources.length, 2);
+  assert.deepEqual(db.sources.map((x) => x.source_system), ['hira_hospital_discovery', 'hira_hospital_discovery']);
+  assert.deepEqual(db.sources.map((x) => x.raw), [{ basis: { ykiho: 'A' } }, { basis: { ykiho: 'B' } }]);
   assert.deepEqual(seen.args, { clCd: '28', pageNo: 1, numOfRows: DISCOVERY_PAGE_SIZE });
   const reserve = db.calls.find((x) => x.path.includes('reserve_daily_calls'));
   assert.deepEqual(reserve.body, { p_calls: 1, p_requested_cap: 1000 });
   assert.ok(
     db.calls.findIndex((x) => x.path.includes('reserve_daily_calls')) <
+      db.calls.findIndex((x) => x.path.startsWith('facility_sources?on_conflict=')),
+    'quota 예약이 discovery source write보다 먼저여야 함',
+  );
+  assert.ok(
+    db.calls.findIndex((x) => x.path.startsWith('facility_sources?on_conflict=')) <
       db.calls.findIndex((x) => x.path.startsWith('hospital_collection_items?on_conflict=')),
-    'quota 예약이 snapshot write보다 먼저여야 함',
+    'basis source가 snapshot item보다 먼저 저장되어야 함',
   );
 });
 
