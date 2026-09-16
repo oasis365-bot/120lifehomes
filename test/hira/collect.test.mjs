@@ -49,6 +49,17 @@ test('listOnly(readiness) — 필수필드 누락도 동일하게 제외', async
   assert.equal(r.failures.filter((f) => f.step === 'required_fields').length, 1);
 });
 
+test('snapshot enrichment — 목록 API를 재호출하지 않고 주입된 basis로 상세·평가만 수집한다', async () => {
+  const c = makeMockClient({ listTotal: 1 });
+  const basis = { ykiho: 'SNAPSHOT-ONLY', yadmNm: '스냅샷 요양병원', addr: '서울', XPos: '127.1', YPos: '37.5' };
+  const r = await collectHospitals(c, { maxInstitutions: 1, seededInstitutions: [{ ykiho: 'SNAPSHOT-ONLY', basis }] });
+  assert.equal(r.meta.mode, 'snapshot_enrichment');
+  assert.equal(r.stats.listed, 1);
+  assert.equal(c.calls.some((x) => x.startsWith('list:')), false);
+  assert.equal(c.calls.filter((x) => x === 'evaluation').length, 1);
+  assert.equal(r._normalizedAll.length, 1);
+});
+
 test('maxInstitutions 상한 20 강제', async () => {
   const c = makeMockClient({ listTotal: 100 });
   const r = await collectHospitals(c, { maxInstitutions: 999 });
