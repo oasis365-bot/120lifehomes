@@ -373,7 +373,7 @@ test('HiraError 모양의 경계 오류도 안전한 구성 오류 범주로 기
   assert.doesNotMatch(JSON.stringify(db.jobs[0]), /configuration detail|secret/i);
 });
 
-test('Supabase 저장 오류는 원문 없이 저장소 오류 범주로 기록한다', async () => {
+test('source 저장 오류는 원문 없이 source 저장 단계 범주로 기록한다', async () => {
   const db = makeDb({ jobs: [baseJob()] });
   const original = db.sb;
   const sb = async (path, opt) => {
@@ -383,7 +383,21 @@ test('Supabase 저장 오류는 원문 없이 저장소 오류 범주로 기록�
   await assert.rejects(() => runDiscoveryPage({
     sb, createClient: fakeClient(page()), key: 'secret', uuid: () => 'owner-storage',
   }));
-  assert.equal(db.jobs[0].last_error_code, 'discovery_storage_error');
+  assert.equal(db.jobs[0].last_error_code, 'discovery_sources_write_error');
+  assert.doesNotMatch(JSON.stringify(db.jobs[0]), /sensitive details|secret/i);
+});
+
+test('snapshot item 읽기 오류는 원문 없이 읽기 단계 범주로 기록한다', async () => {
+  const db = makeDb({ jobs: [baseJob()] });
+  const original = db.sb;
+  const sb = async (path, opt) => {
+    if (path.startsWith('hospital_collection_items?job_id=')) throw new Error('Supabase 500 sensitive details');
+    return original(path, opt);
+  };
+  await assert.rejects(() => runDiscoveryPage({
+    sb, createClient: fakeClient(page()), key: 'secret', uuid: () => 'owner-read',
+  }));
+  assert.equal(db.jobs[0].last_error_code, 'discovery_items_read_error');
   assert.doesNotMatch(JSON.stringify(db.jobs[0]), /sensitive details|secret/i);
 });
 
