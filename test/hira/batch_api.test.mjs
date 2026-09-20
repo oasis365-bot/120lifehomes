@@ -104,6 +104,14 @@ test('정상 요청은 안전한 batch 결과만 200으로 반환한다', async 
   assert.equal(out.headers['Cache-Control'], 'no-store');
 });
 
+test('HIRA 일시 오류의 retry_later는 200과 안전한 집계만 반환한다', async () => {
+  const { out } = await invoke({
+    run: async () => ({ ok: true, status: 'retry_later', didWork: false, phase: 'discovery', error: 'hidden' }),
+  });
+  assert.equal(out.code, 200);
+  assert.deepEqual(out.payload, { ok: true, status: 'retry_later', didWork: false, phase: 'discovery' });
+});
+
 test('batch 결과도 whitelist로 재구성해 내부 필드를 버린다', async () => {
   const { out } = await invoke({
     run: async () => ({
