@@ -308,6 +308,25 @@ for (const [name, errorOrPage] of [
   });
 }
 
+for (const [name, failureKind, expectedCode] of [
+  ['HIRA HTTP 5xx', 'http_5xx', 'hira_http_5xx'],
+  ['HIRA timeout', 'timeout', 'hira_timeout'],
+  ['HIRA gateway code 12', 'result_code_12', 'hira_result_code_12'],
+]) {
+  test(`${name} 재시도 소진은 cursor를 보존하고 retry_later로 정상 종료한다`, async () => {
+    const db = makeDb({ jobs: [{ ...baseJob(), discovery_page: 11 }] });
+    const out = await runDiscoveryPage({
+      sb: db.sb,
+      createClient: fakeClient(new HiraError('safe', { reason: 'http', failureKind })),
+      key: 'secret', uuid: () => `owner-${failureKind}`,
+    });
+    assert.deepEqual(out, { ok: true, status: 'retry_later', didWork: false, phase: 'discovery' });
+    assert.equal(db.jobs[0].discovery_page, 11);
+    assert.equal(db.jobs[0].last_error_code, expectedCode);
+    assert.equal(db.calls.find((x) => x.path.includes('release_lease')).body.p_next_status, 'pending');
+  });
+}
+
 for (const [name, bad] of [
   ['비정상 resultCode', { ...page(), resultCode: '30' }],
   ['pageNo 불일치', page({ pageNo: 2 })],
