@@ -12,6 +12,7 @@ function makeDb(seed = {}) {
   const calls = [];
   const rpc = { acquire: seed.acquire ?? true, reserve: seed.reserve ?? true, release: seed.release ?? true };
   let conflictOnce = seed.conflictOnce === true;
+  let itemsWriteFails = seed.itemsWriteFails ?? 0;
   const sb = async (path, opt = {}) => {
     const method = (opt.method || 'GET').toUpperCase();
     calls.push({ path, method, body: structuredClone(opt.body), prefer: opt.prefer });
@@ -36,6 +37,10 @@ function makeDb(seed = {}) {
       return { data: items.map((x) => ({ ...x })) };
     }
     if (path.startsWith('hospital_collection_items?on_conflict=') && method === 'POST') {
+      if (itemsWriteFails > 0) {
+        itemsWriteFails -= 1;
+        throw new Error('Supabase 502 transient write failure');
+      }
       for (const row of opt.body) {
         if (!items.some((x) => x.job_id === row.job_id && x.facility_id === row.facility_id)) items.push({ ...row });
       }
@@ -113,6 +118,19 @@ test('새 job 생성 후 정확히 한 페이지를 snapshot items에 저장하�
     db.calls.findIndex((x) => x.path.startsWith('facility_sources?on_conflict=')) <
       db.calls.findIndex((x) => x.path.startsWith('hospital_collection_items?on_conflict=')),
     'basis source가 snapshot item보다 먼저 저장되어야 함',
+  );
+});
+
+test('snapshot item upsert의 일시 실패는 같은 conflict-safe 요청을 한 번 재시도한다', async () => {
+  const db = makeDb({ jobs: [baseJob()], itemsWriteFails: 1 });
+  const out = await runDiscoveryPage({
+    sb: db.sb, createClient: fakeClient(page()), key: 'secret', uuid: () => 'owner-retry',
+  });
+  assert.equal(out.status, 'page_complete');
+  assert.equal(db.items.length, 2);
+  assert.equal(
+    db.calls.filter((x) => x.path.startsWith('hospital_collection_items?on_conflict=')).length,
+    2,
   );
 });
 
