@@ -286,7 +286,7 @@ test('quota RPC 오류는 당일 소진으로 숨기지 않고 실패·pending�
     return original(path, opt);
   };
   await assert.rejects(() => runDiscoveryPage({ sb, createClient, key: 'secret', uuid: () => 'owner-rpc-fail' }));
-  assert.equal(db.jobs[0].last_error_code, 'discovery_failed');
+  assert.equal(db.jobs[0].last_error_code, 'quota_reservation_failed');
   assert.equal(db.calls.find((x) => x.path.includes('release_lease')).body.p_next_status, 'pending');
 });
 
@@ -344,9 +344,22 @@ for (const [name, bad] of [
     }));
     assert.equal(db.items.length, 0);
     assert.equal(db.jobs[0].discovery_page, 0);
-    assert.equal(db.jobs[0].last_error_code, 'discovery_failed');
+    assert.equal(db.jobs[0].last_error_code, 'hira_response_invalid');
   });
 }
+
+test('비재시도 게이트웨이 오류는 원문 없이 안전한 오류 범주를 기록한다', async () => {
+  const db = makeDb({ jobs: [baseJob()] });
+  await assert.rejects(() => runDiscoveryPage({
+    sb: db.sb,
+    createClient: fakeClient(new HiraError('gateway detail must not persist', {
+      reason: 'gateway', failureKind: 'unknown',
+    })),
+    key: 'secret', uuid: () => 'owner-gateway',
+  }));
+  assert.equal(db.jobs[0].last_error_code, 'hira_gateway_error');
+  assert.doesNotMatch(JSON.stringify(db.jobs[0]), /gateway detail|secret/i);
+});
 
 test('마지막 페이지의 unique snapshot 수가 totalCount와 다르면 완료 처리하지 않는다', async () => {
   const db = makeDb({
