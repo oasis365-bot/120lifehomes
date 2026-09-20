@@ -361,6 +361,32 @@ test('비재시도 게이트웨이 오류는 원문 없이 안전한 오류 범�
   assert.doesNotMatch(JSON.stringify(db.jobs[0]), /gateway detail|secret/i);
 });
 
+test('HiraError 모양의 경계 오류도 안전한 구성 오류 범주로 기록한다', async () => {
+  const db = makeDb({ jobs: [baseJob()] });
+  const crossBundleError = Object.assign(new Error('configuration detail must not persist'), {
+    name: 'HiraError', reason: 'config', failureKind: 'unknown',
+  });
+  await assert.rejects(() => runDiscoveryPage({
+    sb: db.sb, createClient: fakeClient(crossBundleError), key: 'secret', uuid: () => 'owner-config',
+  }));
+  assert.equal(db.jobs[0].last_error_code, 'hira_config_error');
+  assert.doesNotMatch(JSON.stringify(db.jobs[0]), /configuration detail|secret/i);
+});
+
+test('Supabase 저장 오류는 원문 없이 저장소 오류 범주로 기록한다', async () => {
+  const db = makeDb({ jobs: [baseJob()] });
+  const original = db.sb;
+  const sb = async (path, opt) => {
+    if (path.startsWith('facility_sources')) throw new Error('Supabase 400 sensitive details');
+    return original(path, opt);
+  };
+  await assert.rejects(() => runDiscoveryPage({
+    sb, createClient: fakeClient(page()), key: 'secret', uuid: () => 'owner-storage',
+  }));
+  assert.equal(db.jobs[0].last_error_code, 'discovery_storage_error');
+  assert.doesNotMatch(JSON.stringify(db.jobs[0]), /sensitive details|secret/i);
+});
+
 test('마지막 페이지의 unique snapshot 수가 totalCount와 다르면 완료 처리하지 않는다', async () => {
   const db = makeDb({
     jobs: [{ ...baseJob(), discovery_page: 1 }],
