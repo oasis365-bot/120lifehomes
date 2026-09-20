@@ -36,15 +36,17 @@ function makeDb(seed = {}) {
     if (path.startsWith('hospital_collection_items?job_id=') && method === 'GET') {
       return { data: items.map((x) => ({ ...x })) };
     }
-    if (path.startsWith('hospital_collection_items?on_conflict=') && method === 'POST') {
+    if (path.startsWith('rpc/hospital_collection_insert_discovery_items') && method === 'POST') {
       if (itemsWriteFails > 0) {
         itemsWriteFails -= 1;
         throw new Error('Supabase 502 transient write failure');
       }
-      for (const row of opt.body) {
-        if (!items.some((x) => x.job_id === row.job_id && x.facility_id === row.facility_id)) items.push({ ...row });
+      for (const row of opt.body.p_rows) {
+        if (!items.some((x) => x.job_id === opt.body.p_job_id && x.facility_id === row.facility_id)) {
+          items.push({ ...row, job_id: opt.body.p_job_id });
+        }
       }
-      return { data: null };
+      return { data: true };
     }
     if (path.startsWith('facility_sources?on_conflict=') && method === 'POST') {
       for (const row of opt.body) {
@@ -116,7 +118,7 @@ test('새 job 생성 후 정확히 한 페이지를 snapshot items에 저장하�
   );
   assert.ok(
     db.calls.findIndex((x) => x.path.startsWith('facility_sources?on_conflict=')) <
-      db.calls.findIndex((x) => x.path.startsWith('hospital_collection_items?on_conflict=')),
+      db.calls.findIndex((x) => x.path.startsWith('rpc/hospital_collection_insert_discovery_items')),
     'basis source가 snapshot item보다 먼저 저장되어야 함',
   );
 });
@@ -129,7 +131,7 @@ test('snapshot item upsert의 일시 실패는 같은 conflict-safe 요청을 �
   assert.equal(out.status, 'page_complete');
   assert.equal(db.items.length, 2);
   assert.equal(
-    db.calls.filter((x) => x.path.startsWith('hospital_collection_items?on_conflict=')).length,
+    db.calls.filter((x) => x.path.startsWith('rpc/hospital_collection_insert_discovery_items')).length,
     2,
   );
 });
@@ -142,9 +144,9 @@ test('100개 snapshot item은 작은 conflict-safe write 단위로 나눈다', a
   });
   assert.equal(out.added, DISCOVERY_PAGE_SIZE);
   assert.equal(db.items.length, DISCOVERY_PAGE_SIZE);
-  const writes = db.calls.filter((x) => x.path.startsWith('hospital_collection_items?on_conflict='));
+  const writes = db.calls.filter((x) => x.path.startsWith('rpc/hospital_collection_insert_discovery_items'));
   assert.equal(writes.length, DISCOVERY_PAGE_SIZE / DISCOVERY_ITEM_WRITE_CHUNK_SIZE);
-  assert.ok(writes.every((x) => x.body.length <= DISCOVERY_ITEM_WRITE_CHUNK_SIZE));
+  assert.ok(writes.every((x) => x.body.p_rows.length <= DISCOVERY_ITEM_WRITE_CHUNK_SIZE));
 });
 
 test('통합: 실제 HIRA client의 HTTP 재시도마다 quota를 1회씩 먼저 예약한다', async () => {
