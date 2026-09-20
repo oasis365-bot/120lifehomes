@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHiraClient, HiraError } from '../../lib/hira/client.js';
 import {
-  COLLECTION_JOB, DAILY_CALL_CAP_HARD_MAX, DISCOVERY_PAGE_SIZE, runDiscoveryPage,
+  COLLECTION_JOB, DAILY_CALL_CAP_HARD_MAX, DISCOVERY_ITEM_WRITE_CHUNK_SIZE, DISCOVERY_PAGE_SIZE, runDiscoveryPage,
 } from '../../lib/hira/batch_discovery.js';
 
 function makeDb(seed = {}) {
@@ -132,6 +132,19 @@ test('snapshot item upsert의 일시 실패는 같은 conflict-safe 요청을 �
     db.calls.filter((x) => x.path.startsWith('hospital_collection_items?on_conflict=')).length,
     2,
   );
+});
+
+test('100개 snapshot item은 작은 conflict-safe write 단위로 나눈다', async () => {
+  const db = makeDb({ jobs: [baseJob()] });
+  const items = Array.from({ length: DISCOVERY_PAGE_SIZE }, (_, i) => ({ ykiho: `CHUNK${i}` }));
+  const out = await runDiscoveryPage({
+    sb: db.sb, createClient: fakeClient(page({ totalCount: 200, items })), key: 'secret', uuid: () => 'owner-chunks',
+  });
+  assert.equal(out.added, DISCOVERY_PAGE_SIZE);
+  assert.equal(db.items.length, DISCOVERY_PAGE_SIZE);
+  const writes = db.calls.filter((x) => x.path.startsWith('hospital_collection_items?on_conflict='));
+  assert.equal(writes.length, DISCOVERY_PAGE_SIZE / DISCOVERY_ITEM_WRITE_CHUNK_SIZE);
+  assert.ok(writes.every((x) => x.body.length <= DISCOVERY_ITEM_WRITE_CHUNK_SIZE));
 });
 
 test('통합: 실제 HIRA client의 HTTP 재시도마다 quota를 1회씩 먼저 예약한다', async () => {
