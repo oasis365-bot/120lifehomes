@@ -49,12 +49,19 @@ for (const authorization of ['', SECRET, 'Basic abc', 'Bearer wrong']) {
   });
 }
 
-test('빈 JSON object만 허용하고 실행 파라미터 주입을 거부한다', async () => {
-  for (const body of [null, [], 'x', { page: 9 }, { action: 'enrich' }]) {
+test('빈 JSON object 또는 singleItemTest:true만 허용하고, 그 외 실행 파라미터 주입은 거부한다', async () => {
+  for (const body of [
+    null, [], 'x', { page: 9 }, { action: 'enrich' },
+    { singleItemTest: false }, { singleItemTest: 'true' }, { singleItemTest: 1 },
+    { singleItemTest: true, page: 1 }, { singleitemtest: true },
+  ]) {
     const { out } = await invoke({ request: req({ body }) });
-    assert.equal(out.code, 400);
+    assert.equal(out.code, 400, `거부돼야 함: ${JSON.stringify(body)}`);
     assert.deepEqual(out.payload, { error: 'invalid_body' });
   }
+  // singleItemTest:true 하나만은 예외적으로 허용된다(아래 별도 테스트에서 효과까지 검증).
+  const { out } = await invoke({ request: req({ body: { singleItemTest: true } }) });
+  assert.equal(out.code, 200);
 });
 
 test('batch switch가 꺼져 있으면 DB/HIRA 호출 없이 501', async () => {
@@ -247,6 +254,44 @@ test('enrichment 루프: item 수 안전 상한(batchMaxItems)을 넘기면 시�
   await h(req(), out);
   assert.equal(calls, 5);
   assert.equal(out.payload.attempted, 5);
+});
+
+test('singleItemTest:true — 시간이 남아도, 다른 batchMaxItems 설정이 더 높아도 정확히 1건에서 멈춘다(개수로 강제, 시간 추정 아님)', async () => {
+  let calls = 0;
+  const out = res();
+  const h = createHandler({
+    env: env(), sbImpl: async () => ({ data: [] }), assertDb: async () => ({ ok: true }),
+    runDiscovery: async () => ({ ok: true, status: 'phase_complete', didWork: false, phase: 'enrichment' }),
+    // 시간도, 기본 개수 상한도 넉넉히 줘도(고정 시계 + maxItems 200) 1건에서 멈춰야
+    // singleItemTest가 시간이 아니라 개수 자체를 강제한다는 증거가 된다.
+    runEnrichment: async () => { calls += 1; return { ok: true, status: 'item_complete', didWork: true, phase: 'enrichment' }; },
+    createClient: () => ({}), now: () => 1_000, uuid: () => 'owner',
+    enrichmentBatchDeadlineMs: 10_000_000, enrichmentBatchMaxItems: 200,
+  });
+  await h(req({ body: { singleItemTest: true } }), out);
+  assert.equal(calls, 1, 'singleItemTest여도 여러 번 불리면 실제 데이터 처리 범위를 못 지킨 것');
+  assert.deepEqual(out.payload, {
+    ok: true, status: 'item_complete', didWork: true, phase: 'enrichment',
+    attempted: 1, completed: 1, retried: 0, deadLettered: 0,
+  });
+});
+
+test('singleItemTest:false(=일반 요청)는 기존처럼 여러 건을 이어서 처리한다(회귀 확인)', async () => {
+  let calls = 0;
+  const out = res();
+  const h = createHandler({
+    env: env(), sbImpl: async () => ({ data: [] }), assertDb: async () => ({ ok: true }),
+    runDiscovery: async () => ({ ok: true, status: 'phase_complete', didWork: false, phase: 'enrichment' }),
+    runEnrichment: async () => {
+      calls += 1;
+      if (calls <= 3) return { ok: true, status: 'item_complete', didWork: true, phase: 'enrichment' };
+      return { ok: true, status: 'enrichment_complete', didWork: false, phase: 'done' };
+    },
+    createClient: () => ({}), now: () => 1_000, uuid: () => 'owner',
+  });
+  await h(req(), out); // body 없음 = 일반 요청
+  assert.equal(calls, 4);
+  assert.equal(out.payload.attempted, 3);
 });
 
 test('enrichment 루프 도중 예외가 나도 내부 메시지는 노출하지 않는다(기존 계약과 동일)', async () => {
