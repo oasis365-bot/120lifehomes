@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runOnce, summarize, main, REQUEST_TIMEOUT_MS } from '../../scripts/run_enrichment_batch.mjs';
+import { runOnce, summarize, main, isScheduleEnabled, REQUEST_TIMEOUT_MS } from '../../scripts/run_enrichment_batch.mjs';
 
 const SECRET = 'super-secret-cron-value';
 const BYPASS = 'super-secret-bypass-value';
@@ -124,6 +124,7 @@ test('main(): 필수 환경변수가 없으면 예외로 죽지 않고, 실패�
   const originalFetch = globalThis.fetch;
   const originalLog = console.log;
   const logs = [];
+  process.env.HOSPITAL_BATCH_SCHEDULE_ENABLED = '1'; // 이 테스트는 "스위치는 켜져 있는데 설정이 없는" 경우를 본다
   delete process.env.HOSPITAL_BATCH_BASE_URL;
   delete process.env.HOSPITAL_BATCH_CRON_SECRET;
   delete process.env.VERCEL_PROTECTION_BYPASS;
@@ -136,6 +137,7 @@ test('main(): 필수 환경변수가 없으면 예외로 죽지 않고, 실패�
   } finally {
     globalThis.fetch = originalFetch;
     console.log = originalLog;
+    delete process.env.HOSPITAL_BATCH_SCHEDULE_ENABLED;
     delete process.env.GITHUB_STEP_SUMMARY;
   }
 
@@ -159,6 +161,7 @@ test('main(): GITHUB_STEP_SUMMARY 파일에 안전한 표만 적고, 콘솔 출�
   const originalFetch = globalThis.fetch;
   const originalLog = console.log;
   const logs = [];
+  process.env.HOSPITAL_BATCH_SCHEDULE_ENABLED = '1';
   process.env.HOSPITAL_BATCH_BASE_URL = 'https://x.invalid';
   process.env.HOSPITAL_BATCH_CRON_SECRET = SECRET;
   process.env.VERCEL_PROTECTION_BYPASS = BYPASS;
@@ -173,6 +176,7 @@ test('main(): GITHUB_STEP_SUMMARY 파일에 안전한 표만 적고, 콘솔 출�
   } finally {
     globalThis.fetch = originalFetch;
     console.log = originalLog;
+    delete process.env.HOSPITAL_BATCH_SCHEDULE_ENABLED;
     delete process.env.HOSPITAL_BATCH_BASE_URL;
     delete process.env.HOSPITAL_BATCH_CRON_SECRET;
     delete process.env.VERCEL_PROTECTION_BYPASS;
@@ -189,6 +193,83 @@ test('main(): GITHUB_STEP_SUMMARY 파일에 안전한 표만 적고, 콘솔 출�
   assert.doesNotMatch(logs.join('\n'), new RegExp(BYPASS));
 
   await rm(dir, { recursive: true, force: true });
+});
+
+for (const [name, value] of [
+  ['설정 안 함(undefined)', undefined],
+  ["'0'", '0'],
+  ["'false'", 'false'],
+  ["'true'(소문자 word는 안 됨)", 'true'],
+  ["'True'(대소문자도 정확히 일치해야 함)", 'True'],
+  ["빈 문자열", ''],
+  ["숫자 1이 아닌 문자열 ' 1'(공백 포함)", ' 1'],
+]) {
+  test(`isScheduleEnabled: ${name}이면 꺼진 것으로 취급한다(기본값 OFF)`, () => {
+    const env = value === undefined ? {} : { HOSPITAL_BATCH_SCHEDULE_ENABLED: value };
+    assert.equal(isScheduleEnabled(env), false);
+  });
+}
+
+test("isScheduleEnabled: 정확히 문자열 '1'일 때만 켜진 것으로 취급한다", () => {
+  assert.equal(isScheduleEnabled({ HOSPITAL_BATCH_SCHEDULE_ENABLED: '1' }), true);
+});
+
+test('main(): 스위치가 꺼져 있으면(기본값) 다른 설정이 하나도 없어도 API를 호출하지 않고 종료코드 0으로 끝난다', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'enrichment-batch-test-'));
+  const summaryPath = join(dir, 'summary.md');
+  const { writeFile } = await import('node:fs/promises');
+  await writeFile(summaryPath, '');
+
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  const logs = [];
+  // 스위치를 켜는 값도, base URL/CRON_SECRET/bypass 도 전부 비워둔다 — main 병합
+  // 직후(시크릿 등록 전)를 그대로 재현한다. 스위치 체크가 다른 어떤 설정보다도
+  // 먼저 일어나야 이 상태에서도 안전하게 "스킵"으로 끝난다.
+  delete process.env.HOSPITAL_BATCH_SCHEDULE_ENABLED;
+  delete process.env.HOSPITAL_BATCH_BASE_URL;
+  delete process.env.HOSPITAL_BATCH_CRON_SECRET;
+  delete process.env.VERCEL_PROTECTION_BYPASS;
+  process.env.GITHUB_STEP_SUMMARY = summaryPath;
+  let fetchCalled = false;
+  globalThis.fetch = async () => { fetchCalled = true; return { ok: true, status: 200, json: async () => ({}) }; };
+  console.log = (...args) => logs.push(args.join(' '));
+  try {
+    await main();
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.log = originalLog;
+    delete process.env.GITHUB_STEP_SUMMARY;
+  }
+
+  assert.equal(fetchCalled, false, '스위치가 꺼져 있으면 어떤 상황에서도 API를 호출하면 안 됨');
+  assert.equal(process.exitCode, 0, '스위치 OFF는 정상적인 상태이지 실패가 아님');
+  process.exitCode = 0;
+  assert.match(logs.join('\n'), /skipped/);
+  assert.match(logs.join('\n'), /HOSPITAL_BATCH_SCHEDULE_ENABLED/);
+  const summaryContent = await readFile(summaryPath, 'utf8');
+  assert.match(summaryContent, /스킵됨/);
+
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("main(): 스위치가 '0'이어도(명시적으로 꺼둔 경우) API를 호출하지 않는다", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  process.env.HOSPITAL_BATCH_SCHEDULE_ENABLED = '0';
+  let fetchCalled = false;
+  globalThis.fetch = async () => { fetchCalled = true; return { ok: true, status: 200, json: async () => ({}) }; };
+  console.log = () => {};
+  try {
+    await main();
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.log = originalLog;
+    delete process.env.HOSPITAL_BATCH_SCHEDULE_ENABLED;
+  }
+  assert.equal(fetchCalled, false);
+  assert.equal(process.exitCode, 0);
+  process.exitCode = 0;
 });
 
 test('상수: 요청 타임아웃은 Vercel maxDuration(60s)보다 여유 있게 길다', () => {

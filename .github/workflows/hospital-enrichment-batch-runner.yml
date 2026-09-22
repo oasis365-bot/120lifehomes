@@ -25,6 +25,13 @@
 #  · 인증 실패(401)·설정 오류(409/500/501/503)·200인데 응답 형태가 이상한 경우
 #    모두 scripts/run_enrichment_batch.mjs가 0이 아닌 종료코드로 끝내 이 Job이
 #    빨간불로 남는다 — "성공"으로 착각해 조용히 방치되는 경우가 없게 했다.
+#  · 전체 스위치(vars.HOSPITAL_BATCH_SCHEDULE_ENABLED, 기본값 OFF): 이 값이
+#    없거나 '1'이 아니면 스크립트는 API를 전혀 호출하지 않고 종료코드 0으로
+#    끝난다(정상적인 "꺼져 있음" 상태이지 오류가 아니다). main에 병합돼 스케줄이
+#    GitHub에 등록되고 15분마다 이 워크플로가 실제로 실행되기 시작해도, 이
+#    변수를 운영자가 '1'로 켜기 전까지는 "병합 = 실제 수집 시작"이 되지 않는다.
+#    검증 뒤 켤 때는 Settings → Secrets and variables → Actions → Variables에서
+#    HOSPITAL_BATCH_SCHEDULE_ENABLED = 1 로 설정한다.
 name: hospital-enrichment-batch-runner
 
 on:
@@ -54,6 +61,7 @@ jobs:
 
       - name: Run one enrichment batch tick
         env:
+          HOSPITAL_BATCH_SCHEDULE_ENABLED: ${{ vars.HOSPITAL_BATCH_SCHEDULE_ENABLED }}
           HOSPITAL_BATCH_BASE_URL: ${{ vars.HOSPITAL_BATCH_BASE_URL }}
           HOSPITAL_BATCH_CRON_SECRET: ${{ secrets.HOSPITAL_BATCH_CRON_SECRET }}
           VERCEL_PROTECTION_BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}

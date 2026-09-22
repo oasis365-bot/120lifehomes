@@ -15,6 +15,27 @@ import { pathToFileURL } from 'node:url';
 
 export const REQUEST_TIMEOUT_MS = 90_000; // 서버 45s 예산 + Vercel maxDuration(60s) + 네트워크 여유
 
+// 예약 실행 전체 스위치. 기본값 OFF — 이 환경변수가 정확히 '1'일 때만 실제로
+// API를 호출한다. main 브랜치에 병합돼 스케줄이 GitHub에 등록·활성화되더라도
+// (즉 15분마다 이 워크플로 자체는 실행되더라도), 운영자가 GitHub repository
+// variable HOSPITAL_BATCH_SCHEDULE_ENABLED 를 '1'로 켜기 전까지는 매 tick이
+// 네트워크 호출 없이 조용히 스킵된다. "병합 = 실제 수집 시작"이 되지 않게 막는
+// 마지막 방어선.
+export function isScheduleEnabled(env = process.env) {
+  return env.HOSPITAL_BATCH_SCHEDULE_ENABLED === '1';
+}
+
+function skippedResult() {
+  const raw = process.env.HOSPITAL_BATCH_SCHEDULE_ENABLED;
+  const shown = raw === undefined ? '(설정 안 됨)' : JSON.stringify(raw);
+  return {
+    line: `enrichment batch tick skipped: HOSPITAL_BATCH_SCHEDULE_ENABLED=${shown} (기본값 OFF — 운영자가 '1'로 켜기 전까지 API를 호출하지 않음)`,
+    exitCode: 0,
+    summaryRow: null,
+    kind: 'skipped',
+  };
+}
+
 function readRequiredEnv(name) {
   const v = process.env[name];
   if (!v) throw new Error(`missing_env:${name}`);
@@ -64,6 +85,7 @@ export function summarize(result) {
       line: `enrichment batch tick failed before HTTP response: reason=${result.reason}${detail}`,
       exitCode: 1,
       summaryRow: null,
+      kind: 'failed',
     };
   }
   if (!result.ok) {
@@ -71,6 +93,7 @@ export function summarize(result) {
       line: `enrichment batch tick failed: status=${result.httpStatus} body=${JSON.stringify(result.body)}`,
       exitCode: 1,
       summaryRow: null,
+      kind: 'failed',
     };
   }
   const b = result.body;
@@ -83,6 +106,7 @@ export function summarize(result) {
       line: `enrichment batch tick failed: unexpected response body on HTTP 200: ${JSON.stringify(b)}`,
       exitCode: 1,
       summaryRow: null,
+      kind: 'failed',
     };
   }
   const safe = {
@@ -94,6 +118,7 @@ export function summarize(result) {
     line: `enrichment batch tick ok: ${JSON.stringify(safe)}`,
     exitCode: 0,
     summaryRow: safe,
+    kind: 'ok',
   };
 }
 
@@ -101,18 +126,31 @@ async function writeStepSummary(summarized) {
   const target = process.env.GITHUB_STEP_SUMMARY;
   if (!target) return; // GitHub Actions 밖(로컬/테스트)에서는 조용히 건너뜀
   const row = summarized.summaryRow;
-  // 실패 케이스는 summarized.line(콘솔에 남긴 것과 동일한 문구)을 그대로 적어,
+  // 실패·스킵 케이스는 summarized.line(콘솔에 남긴 것과 동일한 문구)을 그대로 적어,
   // 콘솔 로그와 Job Summary가 서로 다른 말을 하지 않게 한다.
-  const md = row
-    ? `### Enrichment batch tick\n\n` +
+  let md;
+  if (row) {
+    md = `### Enrichment batch tick\n\n` +
       `| status | phase | didWork | attempted | completed | retried | deadLettered |\n` +
       `|---|---|---|---|---|---|---|\n` +
-      `| ${row.status} | ${row.phase} | ${row.didWork} | ${row.attempted} | ${row.completed} | ${row.retried} | ${row.deadLettered} |\n`
-    : `### Enrichment batch tick — 실패\n\n${summarized.line}\n`;
+      `| ${row.status} | ${row.phase} | ${row.didWork} | ${row.attempted} | ${row.completed} | ${row.retried} | ${row.deadLettered} |\n`;
+  } else if (summarized.kind === 'skipped') {
+    md = `### Enrichment batch tick — 스킵됨(스케줄 스위치 OFF)\n\n${summarized.line}\n`;
+  } else {
+    md = `### Enrichment batch tick — 실패\n\n${summarized.line}\n`;
+  }
   await appendFile(target, md);
 }
 
 export async function main() {
+  if (!isScheduleEnabled()) {
+    const summarized = skippedResult();
+    // eslint-disable-next-line no-console -- GitHub Actions 로그, 비밀값 없음
+    console.log(summarized.line);
+    await writeStepSummary(summarized);
+    process.exitCode = summarized.exitCode;
+    return;
+  }
   let result;
   try {
     result = await runOnce();
