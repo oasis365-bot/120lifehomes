@@ -1,0 +1,50 @@
+# 전국 요양병원 enrichment(PR #19, /api/hospital/batch)를 예약 실행으로 이어서
+# 완료시킨다. 이 워크플로 자체는 HTTP 호출 1회만 하고, 중단·재개·일일 HIRA
+# 호출 한도·재시도는 서버(hospital_collection_jobs 의 lease + daily_usage RPC,
+# runEnrichmentItem 의 재시도/backoff)가 이미 원자적으로 처리한다 — 여기서는
+# 그 안전한 API를 "누가 계속 불러줄지"만 담당한다.
+#
+#  · 시크릿: HOSPITAL_BATCH_CRON_SECRET(필수), VERCEL_PROTECTION_BYPASS(필요시) —
+#    둘 다 GitHub Secrets로만 저장하고, 스크립트는 이 값을 절대 로그에 남기지 않는다.
+#  · 대상 URL: vars.HOSPITAL_BATCH_BASE_URL — 실제 서비스 중인 Production
+#    배포가 아니라, 현재 유효한 Preview 배포 주소를 운영자가 직접 넣어야 한다
+#    (main 브랜치는 Production으로 배포되고 이 API는 Production에서 항상 404).
+#  · 예약 실행은 지연·건너뜀이 있을 수 있다(GitHub 문서에 명시된 동작) — 이
+#    워크플로는 그걸 막으려 하지 않고, 놓친 tick은 다음 tick이 그대로 이어받게만
+#    설계했다(서버 쪽 상태가 항상 재개 가능하므로 정확한 시각 보장이 필요 없음).
+#  · 중복 실행 방지: concurrency group으로 겹치는 실행을 "취소"가 아니라 "대기열"
+#    시켜, 같은 시각에 두 tick이 동시에 API를 부르지 않게 한다(서버 lease가
+#    최후 방어선이지만, Actions 쪽에서도 애초에 동시 호출을 만들지 않는다).
+name: hospital-enrichment-batch-runner
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: hospital-enrichment-batch-runner
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    # 서버 자체 배치 루프 예산(45s) + Vercel maxDuration(60s) + 여유를 감안해도
+    # 5분이면 충분하다 — 그 이상 걸리면 이 tick은 포기하고 다음 tick에 맡긴다.
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run one enrichment batch tick
+        env:
+          HOSPITAL_BATCH_BASE_URL: ${{ vars.HOSPITAL_BATCH_BASE_URL }}
+          HOSPITAL_BATCH_CRON_SECRET: ${{ secrets.HOSPITAL_BATCH_CRON_SECRET }}
+          VERCEL_PROTECTION_BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}
+        run: node scripts/run_enrichment_batch.mjs
