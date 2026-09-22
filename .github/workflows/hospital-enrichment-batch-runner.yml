@@ -32,12 +32,28 @@
 #    변수를 운영자가 '1'로 켜기 전까지는 "병합 = 실제 수집 시작"이 되지 않는다.
 #    검증 뒤 켤 때는 Settings → Secrets and variables → Actions → Variables에서
 #    HOSPITAL_BATCH_SCHEDULE_ENABLED = 1 로 설정한다.
+#  · 수동 1회 시험(workflow_dispatch 입력 single_item_test): 위 전체 스위치와는
+#    완전히 별개 경로다. 이 입력을 켜서 수동 실행하면, HOSPITAL_BATCH_SCHEDULE_ENABLED
+#    저장소 변수가 여전히 꺼져 있어도(값을 절대 바꾸지 않는다) 그 실행 1회에
+#    한해 API를 호출한다 — 단, 서버(hospital_batch.js)가 singleItemTest:true
+#    바디를 받아 처리 개수를 정확히 1건으로 강제한다(시간 예산이 아니라 개수
+#    자체를 코드로 못박음). 예약 스케줄 tick과 "single_item_test 없이 수동
+#    실행"은 기존 그대로 HOSPITAL_BATCH_SCHEDULE_ENABLED만 따른다 — 영향 없음.
 name: hospital-enrichment-batch-runner
 
 on:
   schedule:
     - cron: '*/15 * * * *'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      single_item_test:
+        description: >-
+          수동 1회 시험 실행. 기관 최대 1곳만 실제로 처리(서버가 개수로 강제,
+          시간 추정 아님). 저장소 변수 HOSPITAL_BATCH_SCHEDULE_ENABLED는 이
+          실행으로 바뀌지 않고 계속 꺼진 상태로 남는다.
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: hospital-enrichment-batch-runner
@@ -62,6 +78,7 @@ jobs:
       - name: Run one enrichment batch tick
         env:
           HOSPITAL_BATCH_SCHEDULE_ENABLED: ${{ vars.HOSPITAL_BATCH_SCHEDULE_ENABLED }}
+          HOSPITAL_BATCH_SINGLE_ITEM_TEST: ${{ (github.event_name == 'workflow_dispatch' && inputs.single_item_test == true) && '1' || '0' }}
           HOSPITAL_BATCH_BASE_URL: ${{ vars.HOSPITAL_BATCH_BASE_URL }}
           HOSPITAL_BATCH_CRON_SECRET: ${{ secrets.HOSPITAL_BATCH_CRON_SECRET }}
           VERCEL_PROTECTION_BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}

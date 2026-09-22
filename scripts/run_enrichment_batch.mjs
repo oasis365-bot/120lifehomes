@@ -25,6 +25,17 @@ export function isScheduleEnabled(env = process.env) {
   return env.HOSPITAL_BATCH_SCHEDULE_ENABLED === '1';
 }
 
+// 수동 1회 시험 경로. 위 예약 스위치와는 완전히 독립적이다 — workflow_dispatch의
+// single_item_test 입력이 켜졌을 때만 워크플로가 이 값을 '1'로 넘긴다(스케줄
+// 트리거에는 이 입력 자체가 없으므로 항상 꺼짐). 켜지면 isScheduleEnabled()
+// 값과 무관하게 이번 실행 1회만 API를 호출하되, hospital_batch.js에
+// singleItemTest:true 바디를 보내 서버가 처리 개수를 정확히 1건으로 강제하게
+// 한다 — HOSPITAL_BATCH_SCHEDULE_ENABLED 저장소 변수 자체는 이 경로로 절대
+// 바뀌지 않는다(그냥 읽지 않을 뿐).
+export function isSingleItemTestRequested(env = process.env) {
+  return env.HOSPITAL_BATCH_SINGLE_ITEM_TEST === '1';
+}
+
 function skippedResult() {
   const raw = process.env.HOSPITAL_BATCH_SCHEDULE_ENABLED;
   const shown = raw === undefined ? '(설정 안 됨)' : JSON.stringify(raw);
@@ -52,6 +63,7 @@ export async function runOnce({
   bypass = process.env.VERCEL_PROTECTION_BYPASS || '',
   fetchImpl = fetch,
   timeoutMs = REQUEST_TIMEOUT_MS,
+  requestBody = '{}',
 } = {}) {
   const headers = { Authorization: `Bearer ${cronSecret}`, 'Content-Type': 'application/json' };
   if (bypass) headers['x-vercel-protection-bypass'] = bypass;
@@ -61,7 +73,7 @@ export async function runOnce({
   let response;
   try {
     response = await fetchImpl(`${String(baseUrl).replace(/\/+$/, '')}/api/hospital/batch`, {
-      method: 'POST', headers, body: '{}', signal: controller.signal,
+      method: 'POST', headers, body: requestBody, signal: controller.signal,
     });
   } catch (e) {
     clearTimeout(timer);
@@ -143,7 +155,11 @@ async function writeStepSummary(summarized) {
 }
 
 export async function main() {
-  if (!isScheduleEnabled()) {
+  const singleItemTest = isSingleItemTestRequested();
+  // single-item 수동 시험은 예약 스위치와 무관하게 진행된다(스위치 값 자체는
+  // 절대 읽거나 바꾸지 않음) — 그 외(스케줄 tick, single_item_test 없는 수동
+  // 실행)는 기존 그대로 isScheduleEnabled()만 따른다.
+  if (!singleItemTest && !isScheduleEnabled()) {
     const summarized = skippedResult();
     // eslint-disable-next-line no-console -- GitHub Actions 로그, 비밀값 없음
     console.log(summarized.line);
@@ -151,9 +167,13 @@ export async function main() {
     process.exitCode = summarized.exitCode;
     return;
   }
+  if (singleItemTest) {
+    // eslint-disable-next-line no-console -- GitHub Actions 로그, 비밀값 없음
+    console.log('single-item test requested: forcing exactly 1 enrichment item via singleItemTest:true (schedule switch value is untouched)');
+  }
   let result;
   try {
-    result = await runOnce();
+    result = await runOnce(singleItemTest ? { requestBody: JSON.stringify({ singleItemTest: true }) } : undefined);
   } catch (e) {
     // readRequiredEnv(HOSPITAL_BATCH_BASE_URL/HOSPITAL_BATCH_CRON_SECRET) 누락처럼
     // 네트워크 요청을 시작하기도 전에 실패하는 설정 오류. try/catch 없이 두면 Node가
