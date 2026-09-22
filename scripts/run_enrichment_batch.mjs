@@ -59,8 +59,9 @@ export async function runOnce({
 /** 로그 한 줄 + 종료코드 + (있으면) 요약 테이블 행을 만든다. */
 export function summarize(result) {
   if (!result.ok && result.httpStatus === null) {
+    const detail = result.errorMessage ? ` detail=${result.errorMessage}` : '';
     return {
-      line: `enrichment batch tick failed before HTTP response: reason=${result.reason}`,
+      line: `enrichment batch tick failed before HTTP response: reason=${result.reason}${detail}`,
       exitCode: 1,
       summaryRow: null,
     };
@@ -72,9 +73,20 @@ export function summarize(result) {
       summaryRow: null,
     };
   }
-  const b = result.body || {};
+  const b = result.body;
+  // HTTP 200이라도 응답 형태가 hospital_batch.js의 계약(ok:true + 문자열 status +
+  // boolean didWork)과 다르면 성공으로 치지 않는다 — 잘못된 URL이 다른 서비스로
+  // 연결되거나, 응답이 깨진 채 200을 반환하는 등의 설정 오류를 "성공"으로
+  // 착각해 Actions가 초록불로 남는 사고를 막기 위함이다.
+  if (!b || b.ok !== true || typeof b.status !== 'string' || !b.status || typeof b.didWork !== 'boolean') {
+    return {
+      line: `enrichment batch tick failed: unexpected response body on HTTP 200: ${JSON.stringify(b)}`,
+      exitCode: 1,
+      summaryRow: null,
+    };
+  }
   const safe = {
-    status: b.status ?? null, phase: b.phase ?? null, didWork: b.didWork ?? null,
+    status: b.status, phase: b.phase ?? null, didWork: b.didWork,
     attempted: b.attempted ?? 0, completed: b.completed ?? 0,
     retried: b.retried ?? 0, deadLettered: b.deadLettered ?? 0,
   };
@@ -85,26 +97,38 @@ export function summarize(result) {
   };
 }
 
-async function writeStepSummary(result, summarized) {
+async function writeStepSummary(summarized) {
   const target = process.env.GITHUB_STEP_SUMMARY;
   if (!target) return; // GitHub Actions 밖(로컬/테스트)에서는 조용히 건너뜀
   const row = summarized.summaryRow;
+  // 실패 케이스는 summarized.line(콘솔에 남긴 것과 동일한 문구)을 그대로 적어,
+  // 콘솔 로그와 Job Summary가 서로 다른 말을 하지 않게 한다.
   const md = row
     ? `### Enrichment batch tick\n\n` +
       `| status | phase | didWork | attempted | completed | retried | deadLettered |\n` +
       `|---|---|---|---|---|---|---|\n` +
       `| ${row.status} | ${row.phase} | ${row.didWork} | ${row.attempted} | ${row.completed} | ${row.retried} | ${row.deadLettered} |\n`
-    : `### Enrichment batch tick — 실패\n\n` +
-      `HTTP status: ${result.httpStatus ?? '(응답 없음)'} / reason: ${result.reason ?? 'http_error'}\n`;
+    : `### Enrichment batch tick — 실패\n\n${summarized.line}\n`;
   await appendFile(target, md);
 }
 
 export async function main() {
-  const result = await runOnce();
+  let result;
+  try {
+    result = await runOnce();
+  } catch (e) {
+    // readRequiredEnv(HOSPITAL_BATCH_BASE_URL/HOSPITAL_BATCH_CRON_SECRET) 누락처럼
+    // 네트워크 요청을 시작하기도 전에 실패하는 설정 오류. try/catch 없이 두면 Node가
+    // 처리되지 않은 예외로 스크립트를 죽여 exitCode는 여전히 1이 되긴 하지만, 우리
+    // 로그 형식·GITHUB_STEP_SUMMARY 기록을 건너뛰게 된다 — 여기서 잡아 같은 안전한
+    // 경로로 보고한다. e.message는 이 스크립트 안에서 비밀값이 섞일 일이 없는
+    // 제어된 문자열(예: "missing_env:HOSPITAL_BATCH_BASE_URL")만 담는다.
+    result = { ok: false, httpStatus: null, reason: 'config', body: null, errorMessage: String(e?.message || e) };
+  }
   const summarized = summarize(result);
   // eslint-disable-next-line no-console -- GitHub Actions 로그로 남기는 용도, 비밀값 없음
   console.log(summarized.line);
-  await writeStepSummary(result, summarized);
+  await writeStepSummary(summarized);
   process.exitCode = summarized.exitCode;
 }
 

@@ -99,6 +99,57 @@ test('summarize: HTTP 실패/네트워크 실패 모두 exitCode 1이고 summary
   assert.match(netFail.line, /timeout/);
 });
 
+for (const [name, body] of [
+  ['빈 응답(null, 예: JSON 파싱 실패 시 runOnce가 만드는 값)', null],
+  ['ok 필드 누락', { status: 'item_complete', didWork: true }],
+  ['status가 문자열이 아님', { ok: true, status: 123, didWork: true }],
+  ['status가 빈 문자열', { ok: true, status: '', didWork: true }],
+  ['didWork가 boolean이 아님', { ok: true, status: 'item_complete', didWork: 'yes' }],
+  ['완전히 다른 서비스의 JSON(엉뚱한 URL을 가리킬 때 재현 가능)', { message: 'Hello from a different app' }],
+]) {
+  test(`summarize: HTTP 200이라도 응답 형태가 계약과 다르면(${name}) 성공으로 치지 않는다`, () => {
+    const out = summarize({ ok: true, httpStatus: 200, body });
+    assert.equal(out.exitCode, 1, '설정 오류·엉뚱한 대상 URL을 "성공"으로 착각하면 안 됨');
+    assert.equal(out.summaryRow, null);
+    assert.match(out.line, /unexpected response body/);
+  });
+}
+
+test('main(): 필수 환경변수가 없으면 예외로 죽지 않고, 실패로 안전하게 종료·기록한다(설정 오류가 초록불로 안 보이게)', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'enrichment-batch-test-'));
+  const summaryPath = join(dir, 'summary.md');
+  const { writeFile } = await import('node:fs/promises');
+  await writeFile(summaryPath, '');
+
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  const logs = [];
+  delete process.env.HOSPITAL_BATCH_BASE_URL;
+  delete process.env.HOSPITAL_BATCH_CRON_SECRET;
+  delete process.env.VERCEL_PROTECTION_BYPASS;
+  process.env.GITHUB_STEP_SUMMARY = summaryPath;
+  let fetchCalled = false;
+  globalThis.fetch = async () => { fetchCalled = true; return { ok: true, status: 200, json: async () => ({}) }; };
+  console.log = (...args) => logs.push(args.join(' '));
+  try {
+    await main();
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.log = originalLog;
+    delete process.env.GITHUB_STEP_SUMMARY;
+  }
+
+  assert.equal(fetchCalled, false, '설정이 없으면 네트워크 호출 자체를 시도하면 안 됨');
+  assert.equal(process.exitCode, 1);
+  process.exitCode = 0; // 이 프로세스 안에서 다른 테스트에 영향 주지 않도록 리셋
+  assert.match(logs.join('\n'), /missing_env:HOSPITAL_BATCH_BASE_URL/);
+  const summaryContent = await readFile(summaryPath, 'utf8');
+  assert.match(summaryContent, /실패/);
+  assert.match(summaryContent, /missing_env/);
+
+  await rm(dir, { recursive: true, force: true });
+});
+
 test('main(): GITHUB_STEP_SUMMARY 파일에 안전한 표만 적고, 콘솔 출력에도 비밀값이 없다', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'enrichment-batch-test-'));
   const summaryPath = join(dir, 'summary.md');
