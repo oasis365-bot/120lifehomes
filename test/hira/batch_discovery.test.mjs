@@ -13,6 +13,10 @@ function makeDb(seed = {}) {
   const rpc = { acquire: seed.acquire ?? true, reserve: seed.reserve ?? true, release: seed.release ?? true };
   let conflictOnce = seed.conflictOnce === true;
   let itemsWriteFails = seed.itemsWriteFails ?? 0;
+  // 실제 Supabase 프로젝트의 "Max Rows" 설정(응답 상한)을 흉내낸다. 기본은 실제
+  // 값(1000)과 동일하게 두되, 페이지네이션 자체를 검증하는 테스트는 이 값을 낮게
+  // seed해서 적은 데이터로도 여러 페이지에 걸친 응답을 재현한다.
+  const maxRows = seed.maxRows ?? 1000;
   const sb = async (path, opt = {}) => {
     const method = (opt.method || 'GET').toUpperCase();
     calls.push({ path, method, body: structuredClone(opt.body), prefer: opt.prefer });
@@ -34,7 +38,12 @@ function makeDb(seed = {}) {
       return { data: [{ ...row }] };
     }
     if (path.startsWith('hospital_collection_items?job_id=') && method === 'GET') {
-      return { data: items.map((x) => ({ ...x })) };
+      const qs = new URL(`http://x/${path}`).searchParams;
+      const offset = parseInt(qs.get('offset') || '0', 10);
+      const limit = parseInt(qs.get('limit') || String(items.length), 10);
+      const capped = Math.min(limit, maxRows);
+      const sorted = [...items].sort((a, b) => (Number(a.ordinal) || 0) - (Number(b.ordinal) || 0));
+      return { data: sorted.slice(offset, offset + capped).map((x) => ({ ...x })) };
     }
     if (path.startsWith('rpc/hospital_collection_insert_discovery_items') && method === 'POST') {
       if (itemsWriteFails > 0) {
@@ -449,6 +458,55 @@ test('마지막 페이지의 unique snapshot 수가 totalCount와 다르면 완�
   assert.equal(db.jobs[0].phase, 'discovery');
   assert.equal(db.jobs[0].discovery_page, 1);
   assert.equal(db.jobs[0].snapshot_completed_at, undefined);
+});
+
+test('기존 항목이 응답 상한(maxRows)보다 많아도 페이지네이션으로 전부 읽어 ordinal이 이어진다', async () => {
+  const existingCount = 60;
+  const db = makeDb({
+    maxRows: 25, // Supabase Max Rows 설정을 낮게 흉내내 여러 페이지 응답을 강제한다
+    jobs: [{ ...baseJob(), discovery_page: 1 }],
+    items: Array.from({ length: existingCount }, (_, i) => ({
+      job_id: baseJob().id, ordinal: i, facility_id: `H-P${i}`, status: 'pending',
+    })),
+  });
+  const out = await runDiscoveryPage({
+    sb: db.sb,
+    createClient: fakeClient(page({
+      pageNo: 2, totalCount: existingCount + 2, items: [{ ykiho: 'NEW0' }, { ykiho: 'NEW1' }],
+    })),
+    key: 'secret', uuid: () => 'owner-pagination',
+  });
+  assert.equal(out.status, 'snapshot_complete');
+  assert.equal(out.snapshotCount, existingCount + 2);
+  assert.equal(db.items.length, existingCount + 2, 'maxRows 때문에 최근 항목을 놓쳐 새 ordinal이 충돌·유실되면 안 됨');
+  const reads = db.calls.filter((c) => c.method === 'GET' && c.path.startsWith('hospital_collection_items?job_id='));
+  assert.ok(reads.length >= 3, `상한 25로 60개를 읽으려면 최소 3번 요청해야 함(실제 ${reads.length}회)`);
+  const newOrdinals = ['H-NEW0', 'H-NEW1']
+    .map((fid) => db.items.find((x) => x.facility_id === fid)?.ordinal)
+    .sort((a, b) => a - b);
+  assert.deepEqual(newOrdinals, [existingCount, existingCount + 1]);
+});
+
+test('실제 운영 규모(1200개, Supabase 기본 Max Rows 1000)에서도 전부 읽어 완료 처리한다', async () => {
+  const existingCount = 1200;
+  const db = makeDb({
+    jobs: [{ ...baseJob(), discovery_page: 12 }],
+    items: Array.from({ length: existingCount }, (_, i) => ({
+      job_id: baseJob().id, ordinal: i, facility_id: `H-P${i}`, status: 'pending',
+    })),
+  });
+  const out = await runDiscoveryPage({
+    sb: db.sb,
+    createClient: fakeClient(page({
+      pageNo: 13, totalCount: existingCount + 2, items: [{ ykiho: 'NEW0' }, { ykiho: 'NEW1' }],
+    })),
+    key: 'secret', uuid: () => 'owner-1000cap',
+  });
+  assert.equal(out.status, 'snapshot_complete');
+  assert.equal(out.snapshotCount, existingCount + 2);
+  assert.equal(db.items.length, existingCount + 2);
+  const reads = db.calls.filter((c) => c.method === 'GET' && c.path.startsWith('hospital_collection_items?job_id='));
+  assert.ok(reads.length >= 2, `1200개는 Max Rows(1000) 때문에 최소 2페이지로 나뉘어야 함(실제 ${reads.length}회)`);
 });
 
 test('일일 cap 환경값은 기본 1000, 코드 하드 상한 2000을 넘지 않는다', async () => {
