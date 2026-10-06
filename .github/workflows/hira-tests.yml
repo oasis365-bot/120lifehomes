@@ -51,6 +51,6 @@ jobs:
           exit $fail
 
       - name: unit tests
-        # test/db.test.mjs + test/hira/ — test/compare_facilities_api.mjs (라이브 URL 인자 필요) 는 제외.
-        # (node 20.x 는 --test glob 미지원 → 파일/디렉터리 명시)
-        run: node --test test/db.test.mjs test/hira/
+        # test/db.test.mjs + test/hira/*.test.mjs — test/compare_facilities_api.mjs (라이브 URL 인자 필요) 는 제외.
+        # (Node 24 는 --test 에 디렉터리를 주면 파일 경로로 취급해 실패 → glob 으로 *.test.mjs 만 명시)
+        run: node --test test/db.test.mjs "test/hira/*.test.mjs"
