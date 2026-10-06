@@ -23,6 +23,9 @@ function makeDb(seed = {}) {
     if (path.startsWith('rpc/hospital_collection_job_acquire_lease')) return { data: rpc.acquire };
     if (path.startsWith('rpc/hospital_hira_reserve_daily_calls')) return { data: rpc.reserve };
     if (path.startsWith('rpc/hospital_collection_job_release_lease')) return { data: rpc.release };
+    if (path.startsWith('hospital_collection_jobs?job=') && path.includes('status=eq.completed')) {
+      return { data: jobs.filter((x) => x.status === 'completed').slice(0, 1).map((x) => ({ id: x.id })) };
+    }
     if (path.startsWith('hospital_collection_jobs?job=')) {
       const row = jobs.find((x) => ['pending', 'running', 'paused_for_today'].includes(x.status));
       return { data: row ? [{ ...row }] : [] };
@@ -130,6 +133,50 @@ test('새 job 생성 후 정확히 한 페이지를 snapshot items에 저장하�
       db.calls.findIndex((x) => x.path.startsWith('rpc/hospital_collection_insert_discovery_items')),
     'basis source가 snapshot item보다 먼저 저장되어야 함',
   );
+});
+
+test('완료된 job 뒤 예약 tick 은 새 job 을 만들지 않고 HIRA·lease·items 를 건드리지 않는다', async () => {
+  const completed = { ...baseJob(), status: 'completed', phase: 'done' };
+  const db = makeDb({ jobs: [completed] });
+  let clientsMade = 0;
+  const out = await runDiscoveryPage({
+    sb: db.sb, createClient: () => { clientsMade += 1; return {}; }, key: 'secret',
+    uuid: () => 'new-id',
+  });
+  assert.deepEqual(out, { ok: true, status: 'no_active_job', didWork: false, phase: 'done' });
+  assert.equal(db.jobs.length, 1);
+  assert.equal(db.jobs[0].id, completed.id);
+  assert.equal(db.calls.filter((c) => c.method === 'POST' && c.path === 'hospital_collection_jobs').length, 0);
+  assert.equal(db.calls.some((c) => c.path.startsWith('rpc/')), false);
+  assert.equal(db.calls.some((c) => c.path.startsWith('hospital_collection_items')), false);
+  assert.equal(clientsMade, 0);
+  // 같은 tick 을 여러 번 반복해도 새 job 은 0개다.
+  for (let i = 0; i < 3; i += 1) {
+    await runDiscoveryPage({ sb: db.sb, createClient: () => ({}), key: 'secret', uuid: () => 'new-id' });
+  }
+  assert.equal(db.jobs.length, 1);
+});
+
+test('명시적 재수집 옵션(allowNewJobAfterCompleted)이 켜지면 완료 job 뒤에도 새 job 을 만들 수 있다', async () => {
+  const db = makeDb({ jobs: [{ ...baseJob(), status: 'completed', phase: 'done' }] });
+  const out = await runDiscoveryPage({
+    sb: db.sb, createClient: fakeClient(page()), key: 'secret', allowNewJobAfterCompleted: true,
+    uuid: (() => { const xs = ['owner-1', '22222222-2222-4222-8222-222222222222']; return () => xs.shift(); })(),
+  });
+  assert.equal(out.status, 'page_complete');
+  assert.equal(db.jobs.length, 2);
+  assert.equal(db.jobs[1].status, 'pending');
+});
+
+test('진행 중인 활성 job 이 있으면 완료 job 이 함께 있어도 기존 동작 그대로 그 job 을 이어서 쓴다', async () => {
+  const completed = { ...baseJob(), id: 'old-completed', status: 'completed', phase: 'done' };
+  const db = makeDb({ jobs: [{ ...baseJob(), status: 'running' }, completed] });
+  const out = await runDiscoveryPage({
+    sb: db.sb, createClient: fakeClient(page()), key: 'secret', uuid: () => 'owner-1',
+  });
+  assert.equal(out.status, 'page_complete');
+  assert.equal(db.jobs.length, 2);
+  assert.equal(db.calls.filter((c) => c.method === 'POST' && c.path === 'hospital_collection_jobs').length, 0);
 });
 
 test('snapshot item upsert의 일시 실패는 같은 conflict-safe 요청을 한 번 재시도한다', async () => {

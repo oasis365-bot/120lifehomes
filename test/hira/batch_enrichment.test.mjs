@@ -31,7 +31,12 @@ function makeDb({ jobs = [job()], items = [item()], sources = [{
     }
     if (path.startsWith('rpc/hospital_hira_reserve_daily_calls')) return { data: true };
     if (path.startsWith('hospital_collection_jobs?job=')) return { data: jobs.filter((x) => ['pending', 'running', 'paused_for_today'].includes(x.status)).slice(0, 1) };
-    if (path.startsWith('hospital_collection_items?job_id=')) return { data: items.map((x) => ({ ...x })) };
+    if (path.startsWith('hospital_collection_items?job_id=')) {
+      const statuses = path.match(/status=in\.\(([^)]*)\)/)?.[1]?.split(',');
+      const rows = statuses ? items.filter((x) => statuses.includes(x.status)) : items;
+      const limit = parseInt(path.match(/limit=(\d+)/)?.[1] || String(rows.length), 10);
+      return { data: rows.slice(0, limit).map((x) => ({ ...x })) };
+    }
     if (path.startsWith('facility_sources?source_system=')) {
       const external = decodeURIComponent(path.match(/external_id=eq\.([^&]+)/)?.[1] || '');
       return { data: sources.filter((x) => x.external_id === external).map((x) => ({ ...x })) };
@@ -116,4 +121,74 @@ test('남은 항목이 없으면 job을 done/completed로 마감한다', async (
   assert.deepEqual(out, { ok: true, status: 'enrichment_complete', didWork: false, phase: 'done' });
   assert.equal(db.jobs[0].phase, 'done');
   assert.equal(db.jobs[0].status, 'completed');
+});
+
+test('모든 항목이 completed/dead_letter 로 끝났을 때만 job을 done/completed로 마감한다', async () => {
+  const db = makeDb({ items: [
+    item({ id: 'a', ordinal: 0, status: 'completed' }),
+    item({ id: 'b', ordinal: 1, status: 'dead_letter' }),
+  ] });
+  const out = await runEnrichmentItem(deps(db));
+  assert.deepEqual(out, { ok: true, status: 'enrichment_complete', didWork: false, phase: 'done' });
+  assert.equal(db.jobs[0].phase, 'done');
+  assert.equal(db.jobs[0].status, 'completed');
+});
+
+test('미래 시각의 retry_wait 만 남으면 job을 닫지 않고 retry_later, HIRA 호출 0건', async () => {
+  const retryAtMs = NOW + 10 * 60_000;
+  const db = makeDb({ items: [
+    item({ id: 'a', ordinal: 0, status: 'completed' }),
+    item({ id: 'b', ordinal: 1, status: 'retry_wait', attempt_count: 1, next_retry_at: new Date(retryAtMs).toISOString() }),
+  ] });
+  let madeClient = 0;
+  let collected = 0;
+  const out = await runEnrichmentItem(deps(db, {
+    createClient: () => { madeClient += 1; return {}; },
+    collect: async () => { collected += 1; return { _normalizedAll: [] }; },
+  }));
+  assert.deepEqual(out, { ok: true, status: 'retry_later', didWork: false, phase: 'enrichment' });
+  assert.equal(madeClient, 0);
+  assert.equal(collected, 0);
+  assert.equal(db.calls.some((c) => c.path.startsWith('rpc/hospital_hira_reserve_daily_calls')), false);
+  // job 은 닫히지 않고, 항목도 건드리지 않으며, lease 는 pending 으로 반납된다.
+  assert.equal(db.jobs[0].phase, 'enrichment');
+  assert.equal(db.jobs[0].status, 'pending');
+  assert.equal(db.calls.some((c) => c.method === 'PATCH' && c.path.startsWith('hospital_collection_jobs?id=')), false);
+  assert.equal(db.items[1].status, 'retry_wait');
+  assert.equal(db.items[1].attempt_count, 1);
+});
+
+test('재시도 시각이 지나면 같은 job 에서 retry_wait 항목을 처리하고 그 뒤에 마감한다', async () => {
+  const retryAtMs = NOW + 10 * 60_000;
+  const db = makeDb({ items: [
+    item({ id: 'b', ordinal: 0, status: 'retry_wait', attempt_count: 1, next_retry_at: new Date(retryAtMs).toISOString() }),
+  ] });
+  const jobId = db.jobs[0].id;
+  assert.equal((await runEnrichmentItem(deps(db))).status, 'retry_later');
+
+  // 시각이 retry 시각을 지난 뒤: 같은 job 이 그 항목을 처리한다(새 job 아님).
+  const later = deps(db, { now: () => retryAtMs + 1 });
+  const done = await runEnrichmentItem(later);
+  assert.equal(done.status, 'item_complete');
+  assert.equal(db.items[0].status, 'completed');
+  assert.equal(db.items[0].attempt_count, 2);
+  assert.equal(db.jobs.length, 1);
+  assert.equal(db.jobs[0].id, jobId);
+  assert.equal(db.jobs[0].count_processed, 1);
+
+  // 모든 항목이 끝난 다음 tick 에서만 done/completed.
+  const closed = await runEnrichmentItem(later);
+  assert.equal(closed.status, 'enrichment_complete');
+  assert.equal(db.jobs[0].phase, 'done');
+  assert.equal(db.jobs[0].status, 'completed');
+});
+
+test('lease 가 아직 유효한 processing 항목만 남아도 job을 닫지 않는다', async () => {
+  const db = makeDb({ items: [
+    item({ status: 'processing', attempt_count: 1, started_at: new Date(NOW - 10_000).toISOString() }),
+  ] });
+  const out = await runEnrichmentItem(deps(db));
+  assert.equal(out.status, 'retry_later');
+  assert.equal(db.jobs[0].phase, 'enrichment');
+  assert.equal(db.jobs[0].status, 'pending');
 });
