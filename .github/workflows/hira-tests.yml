@@ -1,6 +1,6 @@
 # 요양병원(HIRA) 어댑터 + lib/db 키호환 + LTC 회귀 정적 테스트
 #  · 시크릿 없음 (DATA_GO_KR_KEY / SUPABASE_* 미사용). API 실호출·DB 접근 없음.
-#  · node --check (api/ + lib/ 전 파일) + node --test (Node 20.x 내장 러너). 무의존성.
+#  · node --check (api/ + lib/ 전 파일) + node --test (Node 24.x 내장 러너). 무의존성.
 #  · 빌드·배포·환경변수에 영향 없음 (테스트만).
 #
 #  트리거:
@@ -34,12 +34,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
-      - name: node version (>= 20.11)
+      - name: node version (>= 24)
         run: |
           node --version
-          node -e 'const [maj,min]=process.versions.node.split(".").map(Number); if(maj<20||(maj===20&&min<11)){console.error("need >= 20.11");process.exit(1)}'
+          node -e 'const [maj]=process.versions.node.split(".").map(Number); if(maj<24){console.error("need >= 24");process.exit(1)}'
 
       - name: syntax check (node --check on all api/ + lib/)
         run: |
