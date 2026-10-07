@@ -65,9 +65,10 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
-    # 서버 자체 배치 루프 예산(45s) + Vercel maxDuration(60s) + 여유를 감안해도
-    # 5분이면 충분하다 — 그 이상 걸리면 이 tick은 포기하고 다음 tick에 맡긴다.
-    timeout-minutes: 5
+    # 서버 배치 루프 최악 소요(새 기관 시작 마감 180s + 기관 1곳 최대 40s = 220s)와
+    # 스크립트 요청 타임아웃(240s) + 러너 준비·정리 여유를 감안해 10분이면 충분하다 —
+    # 그 이상 걸리면 이 tick은 포기하고 다음 tick에 맡긴다.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
