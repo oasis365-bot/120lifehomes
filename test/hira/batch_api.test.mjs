@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHandler } from '../../lib/api/hospital_batch.js';
+import { createHandler, ENRICHMENT_BATCH_DEADLINE_MS } from '../../lib/api/hospital_batch.js';
+import { HiraError } from '../../lib/hira/client.js';
 
 const SECRET = 'test-batch-secret-123';
 const env = (extra = {}) => ({
@@ -239,6 +240,81 @@ test('enrichment 루프: 시간 예산(batchDeadlineMs)을 넘기면 item 처리
   await h(req(), out);
   assert.ok(calls >= 2 && calls <= 3, `시간 예산 안에서 멈춰야 함 (실제 ${calls}회)`);
   assert.equal(out.payload.attempted, calls);
+});
+
+// 기본 시간 예산(180초)을 그대로 쓰는 핸들러. enrichmentBatchDeadlineMs 를 주입하지 않아
+// 실제 운영 기본값(ENRICHMENT_BATCH_DEADLINE_MS)이 적용된다.
+function defaultBudgetHandler({ perItemMs, makeRun }) {
+  const clock = { t: 0 };
+  const starts = [];
+  const handler = createHandler({
+    env: env(), sbImpl: async () => ({ data: [] }), assertDb: async () => ({ ok: true }),
+    runDiscovery: async () => ({ ok: true, status: 'phase_complete', didWork: false, phase: 'enrichment' }),
+    runEnrichment: makeRun ? makeRun(clock) : (async () => {
+      starts.push(clock.t);
+      clock.t += perItemMs;
+      return { ok: true, status: 'item_complete', didWork: true, phase: 'enrichment' };
+    }),
+    createClient: () => ({}), now: () => clock.t, uuid: () => 'owner',
+  });
+  return { handler, clock, starts };
+}
+
+test('enrichment 루프(기본 180초 예산): 마감 전에는 계속 처리하고, 마감에 닿으면 새 기관을 시작하지 않는다', async () => {
+  assert.equal(ENRICHMENT_BATCH_DEADLINE_MS, 180_000);
+  const { handler, starts } = defaultBudgetHandler({ perItemMs: 30_000 });
+  const out = res();
+  await handler(req(), out);
+  assert.deepEqual(starts, [0, 30_000, 60_000, 90_000, 120_000, 150_000], '180초 직전까지 6곳을 시작');
+  assert.ok(starts.every((t) => t < ENRICHMENT_BATCH_DEADLINE_MS));
+  assert.equal(out.payload.attempted, 6);
+  assert.equal(out.payload.completed, 6);
+});
+
+test('enrichment 루프(기본 180초 예산): 마감 직전에 시작한 기관은 끝까지 처리하되 그 다음 기관은 시작하지 않는다', async () => {
+  const { handler, clock, starts } = defaultBudgetHandler({ perItemMs: 59_999 });
+  const out = res();
+  await handler(req(), out);
+  assert.deepEqual(starts, [0, 59_999, 119_998, 179_997]);
+  assert.ok(starts.at(-1) < ENRICHMENT_BATCH_DEADLINE_MS, '마지막 시작은 마감 전');
+  assert.ok(clock.t > ENRICHMENT_BATCH_DEADLINE_MS, '진행 중이던 기관은 마감을 넘겨서라도 끝까지 처리');
+  assert.equal(out.payload.attempted, 4, '마감 이후 새 기관 시작 0');
+});
+
+test('enrichment 루프(기본 180초 예산): 일일 한도(paused_for_today)면 시간이 많이 남아도 즉시 멈추고 이후 호출은 0', async () => {
+  let calls = 0;
+  const { handler, clock } = defaultBudgetHandler({
+    makeRun: (c) => async () => {
+      calls += 1;
+      c.t += 1_000;
+      if (calls <= 2) return { ok: true, status: 'item_complete', didWork: true, phase: 'enrichment' };
+      return { ok: true, status: 'paused_for_today', didWork: false, phase: 'enrichment' };
+    },
+  });
+  const out = res();
+  await handler(req(), out);
+  assert.ok(clock.t < ENRICHMENT_BATCH_DEADLINE_MS / 10, '시간 예산은 거의 그대로 남아 있음');
+  assert.equal(calls, 3, '한도 응답 뒤에는 더 호출하지 않음(남은 시간 ≈ 180초)');
+  assert.deepEqual(out.payload, {
+    ok: true, status: 'paused_for_today', didWork: false, phase: 'enrichment',
+    attempted: 2, completed: 2, retried: 0, deadLettered: 0,
+  });
+});
+
+test('enrichment 루프: HIRA deadline(시간 초과) 오류가 나면 그 자리에서 중단하고 503, 이전에 끝낸 기관 수는 유지된다', async () => {
+  let calls = 0;
+  const { handler } = defaultBudgetHandler({
+    makeRun: () => async () => {
+      calls += 1;
+      if (calls <= 2) return { ok: true, status: 'item_complete', didWork: true, phase: 'enrichment' };
+      throw new HiraError('deadline', { reason: 'deadline', failureKind: 'deadline' });
+    },
+  });
+  const out = res();
+  await handler(req(), out);
+  assert.equal(out.code, 503);
+  assert.deepEqual(out.payload, { error: 'batch_failed' });
+  assert.equal(calls, 3, '오류 이후 새 기관 시작 0 — 해당 기관의 retry 처리는 runEnrichmentItem 이 담당');
 });
 
 test('enrichment 루프: item 수 안전 상한(batchMaxItems)을 넘기면 시간이 남아도 멈춘다', async () => {

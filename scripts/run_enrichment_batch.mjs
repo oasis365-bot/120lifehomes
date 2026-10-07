@@ -8,12 +8,13 @@
 //    새로 구현할 필요가 없다.
 //  · 비밀값(CRON_SECRET, Vercel bypass)은 요청 헤더에만 실어 보내고, 어떤 경우에도
 //    console.log/에러 메시지/GITHUB_STEP_SUMMARY 에 출력하지 않는다.
-//  · 서버 쪽 배치 루프 시간 예산(45s)과 Vercel maxDuration(60s)보다 넉넉한 타임아웃을
-//    둬서, 서버가 정상 범위 안에서 오래 걸려도 이 스크립트가 먼저 끊어버리지 않는다.
+//  · 서버 쪽 배치 루프의 최악 소요(새 기관 시작 마감 180s + 기관 1곳 최대 40s = 220s)보다
+//    넉넉하고 Vercel maxDuration(300s)보다는 짧은 타임아웃을 둬서, 서버가 정상 범위
+//    안에서 오래 걸려도 이 스크립트가 먼저 끊어버리지 않는다.
 import { appendFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
-export const REQUEST_TIMEOUT_MS = 90_000; // 서버 45s 예산 + Vercel maxDuration(60s) + 네트워크 여유
+export const REQUEST_TIMEOUT_MS = 240_000; // 서버 최악 220s(180s 마감 + 기관 1곳 40s) + 네트워크 여유, maxDuration(300s) 미만
 
 // 예약 실행 전체 스위치. 기본값 OFF — 이 환경변수가 정확히 '1'일 때만 실제로
 // API를 호출한다. main 브랜치에 병합돼 스케줄이 GitHub에 등록·활성화되더라도

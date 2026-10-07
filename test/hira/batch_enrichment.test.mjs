@@ -108,6 +108,39 @@ test('쿼터/429 오류는 당일 pause하고 dead_letter로 보내지 않는다
   assert.equal(db.jobs[0].status, 'paused_for_today');
 });
 
+test('기관 처리 중 HIRA deadline(시간 초과)이면 dead_letter 가 아니라 retry_wait 로 되돌려 나중에 재시도한다', async () => {
+  const db = makeDb();
+  await assert.rejects(
+    () => runEnrichmentItem(deps(db, {
+      collect: async () => { throw new HiraError('deadline', { reason: 'deadline', failureKind: 'deadline' }); },
+    })),
+    /deadline/,
+  );
+  assert.equal(db.items[0].status, 'retry_wait');
+  assert.equal(db.items[0].attempt_count, 1);
+  assert.equal(db.items[0].last_error_code, 'deadline');
+  assert.ok(Date.parse(db.items[0].next_retry_at) > NOW, '재시도 시각은 미래');
+  assert.equal(db.jobs[0].count_dead_letter, 0);
+  assert.equal(db.jobs[0].count_partial, 1);
+  assert.equal(db.jobs[0].status, 'pending', '일일 한도 pause 가 아니라 일반 재시도');
+});
+
+test('일일 HIRA 호출 한도 보호 유지: 호출마다 예약 RPC 를 거치고, 기본 1000·절대 상한 2000', async () => {
+  const capFor = async (extra) => {
+    const db = makeDb();
+    let reserve;
+    await runEnrichmentItem(deps(db, {
+      createClient: (opt) => { reserve = opt.beforeAttempt; return { opt }; },
+      ...extra,
+    }));
+    await reserve();
+    return db.calls.filter((c) => c.path.startsWith('rpc/hospital_hira_reserve_daily_calls')).at(-1).body;
+  };
+  assert.deepEqual(await capFor({}), { p_calls: 1, p_requested_cap: 1000 });
+  assert.deepEqual(await capFor({ dailyCallCap: 999_999 }), { p_calls: 1, p_requested_cap: 2000 });
+  assert.deepEqual(await capFor({ dailyCallCap: 600 }), { p_calls: 1, p_requested_cap: 600 });
+});
+
 test('강제종료 뒤 stale processing item은 lease 만료 뒤 재처리한다', async () => {
   const db = makeDb({ items: [item({ status: 'processing', attempt_count: 1, started_at: new Date(NOW - 91_000).toISOString() })] });
   const out = await runEnrichmentItem(deps(db));
