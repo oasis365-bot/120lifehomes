@@ -3,7 +3,10 @@
 import ingestHandler from '../../lib/api/hospital_ingest.js';
 import batchHandler from '../../lib/api/hospital_batch.js';
 
-export const config = { maxDuration: 60 };
+// batch 는 요청 1회에 enrichment 를 약 180초까지 이어서 처리한다(lib/api/hospital_batch.js).
+// Hobby + Fluid Compute 의 기본·최대 300초에 맞춘다. ingest 는 자체 wall-clock 예산으로
+// 먼저 끊기므로 이 값을 올려도 동작이 달라지지 않는다.
+export const config = { maxDuration: 300 };
 
 const HANDLERS = Object.freeze({
   ingest: ingestHandler,

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import {
   runOnce, summarize, main, isScheduleEnabled, isSingleItemTestRequested, REQUEST_TIMEOUT_MS,
 } from '../../scripts/run_enrichment_batch.mjs';
+import { ENRICHMENT_BATCH_DEADLINE_MS, HIRA_ITEM_DEADLINE_MS } from '../../lib/api/hospital_batch.js';
 
 const SECRET = 'super-secret-cron-value';
 const BYPASS = 'super-secret-bypass-value';
@@ -390,6 +391,26 @@ test('main(): [예약 실행 경로] single_item_test가 없고 예약 스위치
   process.exitCode = 0;
 });
 
-test('상수: 요청 타임아웃은 Vercel maxDuration(60s)보다 여유 있게 길다', () => {
-  assert.ok(REQUEST_TIMEOUT_MS > 60_000, 'REQUEST_TIMEOUT_MS가 서버 maxDuration보다 짧으면 정상 처리 중에도 클라이언트가 먼저 끊어버릴 수 있음');
+test('상수: 서버 최악 소요(마감+기관 1곳) < 스크립트 요청 타임아웃 < Vercel maxDuration, 실제 설정값 기준', async () => {
+  const routerSrc = await readFile(new URL('../../api/hospital/[action].js', import.meta.url), 'utf8');
+  const batchSrc = await readFile(new URL('../../lib/api/hospital_batch.js', import.meta.url), 'utf8');
+  const maxDurationMs = (src) => Number(/export const config = \{ maxDuration: (\d+) \}/.exec(src)?.[1]) * 1000;
+  const routerMs = maxDurationMs(routerSrc);
+  assert.equal(routerMs, 300_000, '실제 진입 파일(api/hospital/[action].js)의 maxDuration 은 300초');
+  assert.equal(maxDurationMs(batchSrc), routerMs, '배치 모듈의 maxDuration 도 진입 파일과 같아야 함');
+
+  assert.equal(ENRICHMENT_BATCH_DEADLINE_MS, 180_000);
+  assert.equal(HIRA_ITEM_DEADLINE_MS, 40_000);
+  const worstServerMs = ENRICHMENT_BATCH_DEADLINE_MS + HIRA_ITEM_DEADLINE_MS;
+  assert.ok(REQUEST_TIMEOUT_MS > worstServerMs,
+    'REQUEST_TIMEOUT_MS가 서버 최악 소요보다 짧으면 정상 처리 중에도 클라이언트가 먼저 끊어버릴 수 있음');
+  assert.ok(REQUEST_TIMEOUT_MS < routerMs, '타임아웃이 maxDuration 이상이면 Vercel 이 먼저 끊는 구간을 스크립트가 구분할 수 없음');
+  assert.ok(worstServerMs <= routerMs - 60_000, 'maxDuration 과의 여유가 60초 미만이면 504 위험');
+});
+
+test('워크플로 timeout-minutes 는 스크립트 요청 타임아웃(240s)보다 충분히 길다', async () => {
+  const yml = await readFile(new URL('../../.github/workflows/hospital-enrichment-batch-runner.yml', import.meta.url), 'utf8');
+  const minutes = Number(/^\s*timeout-minutes:\s*(\d+)\s*$/m.exec(yml)?.[1]);
+  assert.equal(minutes, 10);
+  assert.ok(minutes * 60_000 >= REQUEST_TIMEOUT_MS + 120_000, '러너 준비·정리 여유(2분) 포함');
 });
