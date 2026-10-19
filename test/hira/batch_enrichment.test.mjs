@@ -19,11 +19,16 @@ const item = (extra = {}) => ({
 
 function makeDb({ jobs = [job()], items = [item()], sources = [{
   source_system: 'hira_hospital_discovery', external_id: 'TEST123', raw: { basis: { ykiho: 'TEST123', yadmNm: '테스트' } },
-}] } = {}) {
+}], usage, usageFails = false } = {}) {
   const calls = [];
   const sb = async (path, opt = {}) => {
     const method = (opt.method || 'GET').toUpperCase();
     calls.push({ path, method, body: structuredClone(opt.body) });
+    // 시작 전 잔여 호출 점검용: usage 가 undefined 면 오늘 행이 없는 것(사용량 0)으로 본다.
+    if (path.startsWith('hospital_hira_daily_usage?')) {
+      if (usageFails) throw new Error('usage_read_failed');
+      return { data: usage === undefined ? [] : [{ reserved_calls: usage }] };
+    }
     if (path.startsWith('rpc/hospital_collection_job_acquire_lease')) return { data: true };
     if (path.startsWith('rpc/hospital_collection_job_release_lease')) {
       Object.assign(jobs[0], { status: opt.body.p_next_status, lease_owner: null });
@@ -139,6 +144,153 @@ test('일일 HIRA 호출 한도 보호 유지: 호출마다 예약 RPC 를 거�
   assert.deepEqual(await capFor({}), { p_calls: 1, p_requested_cap: 1000 });
   assert.deepEqual(await capFor({ dailyCallCap: 999_999 }), { p_calls: 1, p_requested_cap: 2000 });
   assert.deepEqual(await capFor({ dailyCallCap: 600 }), { p_calls: 1, p_requested_cap: 600 });
+});
+
+// ── 일일 한도·429 감지(수정): collect.js 는 단계별 오류를 삼키므로, 클라이언트 메서드가
+//    한도성 오류로 거부되면 persist 전에 paused_for_today 로 멈춰야 한다. ──
+const quotaErr = (failureKind = 'quota_exhausted') => new HiraError('quota', { reason: 'quota', failureKind });
+// 실제 collect 처럼 단계 오류를 삼키고 "기본 정보만" 정규화한 결과를 돌려주는 목.
+function swallowingCollect(callPlan) {
+  return async (client) => {
+    for (const method of callPlan) {
+      try { await client[method](); } catch { /* collect.js 의 단계별 catch 와 같은 동작 */ }
+    }
+    return { _normalizedAll: [{ id: 'H-TEST123' }] };
+  };
+}
+function plannedClient(failAt, kind = 'quota_exhausted') {
+  let n = 0;
+  const call = async () => { n += 1; if (n === failAt) throw quotaErr(kind); return { ok: true }; };
+  return () => ({ getDetailInfo: call, getEquipment: call, getEvaluation: call });
+}
+
+for (const [label, kind, code] of [
+  ['예약 거부(quota_exhausted)', 'quota_exhausted', 'quota_exhausted'],
+  ['HTTP 429', 'http_429', 'hira_rate_limited'],
+  ['upstream_quota', 'upstream_quota', 'hira_rate_limited'],
+]) {
+  test(`한도성 거부(${label})가 collect 에 삼켜져도 persist 전에 paused_for_today 로 멈춘다`, async () => {
+    const db = makeDb({ items: [item({ attempt_count: 1 })] });
+    let persisted = 0;
+    const out = await runEnrichmentItem(deps(db, {
+      createClient: plannedClient(1, kind),
+      collect: swallowingCollect(['getDetailInfo', 'getEquipment', 'getEvaluation']),
+      persist: async () => { persisted += 1; return { status: 'ok', stats: {} }; },
+    }));
+    assert.deepEqual(out, { ok: true, status: 'paused_for_today', didWork: false, phase: 'enrichment' });
+    assert.equal(persisted, 0, 'persist 호출 0 — 기관 데이터를 한 줄도 쓰지 않음');
+    assert.equal(db.items[0].status, 'retry_wait');
+    assert.equal(db.items[0].last_error_code, code);
+    assert.ok(Date.parse(db.items[0].next_retry_at) >= NOW + 23 * 3_600_000, '재시도는 약 24시간 뒤');
+    assert.equal(db.items[0].attempt_count, 1, '한도로 멈춘 시도는 attempt_count 를 소모하지 않음');
+    assert.equal(db.jobs[0].status, 'paused_for_today');
+    assert.equal(db.jobs[0].count_dead_letter, 0);
+  });
+}
+
+for (const [label, failAt] of [['기관 처리 중간(2번째 호출)', 2], ['마지막 평가(3번째) 호출만', 3]]) {
+  test(`${label}에서 거부돼도 앞선 호출 결과를 저장하지 않고 일시 중지한다`, async () => {
+    const db = makeDb();
+    let persisted = 0;
+    const out = await runEnrichmentItem(deps(db, {
+      createClient: plannedClient(failAt),
+      collect: swallowingCollect(['getDetailInfo', 'getEquipment', 'getEvaluation']),
+      persist: async () => { persisted += 1; return { status: 'ok', stats: {} }; },
+    }));
+    assert.equal(out.status, 'paused_for_today');
+    assert.equal(persisted, 0);
+    assert.equal(db.items[0].attempt_count, 0);
+    assert.equal(db.items[0].status, 'retry_wait');
+  });
+}
+
+test('회귀: 한도와 무관한 단계 실패(HTTP 500)는 기존처럼 persist 되고 부분 저장 규칙을 따른다', async () => {
+  const db = makeDb();
+  let persisted = 0;
+  const out = await runEnrichmentItem(deps(db, {
+    createClient: plannedClient(2, 'http_5xx'),
+    collect: swallowingCollect(['getDetailInfo', 'getEquipment', 'getEvaluation']),
+    persist: async () => { persisted += 1; return { status: 'partial', stats: { partial: 0 } }; },
+  }));
+  assert.equal(persisted, 1);
+  assert.equal(out.status, 'item_retry');
+  assert.equal(db.items[0].attempt_count, 1, '일반 실패는 시도 횟수를 소모');
+  assert.equal(db.jobs[0].status, 'pending');
+});
+
+test('회귀: 예약 DB 오류(quota_reservation_failed)는 한도 일시 중지로 취급하지 않는다', async () => {
+  const db = makeDb();
+  let persisted = 0;
+  const out = await runEnrichmentItem(deps(db, {
+    createClient: plannedClient(1, 'quota_reservation_failed'),
+    collect: swallowingCollect(['getDetailInfo', 'getEquipment', 'getEvaluation']),
+    persist: async () => { persisted += 1; return { status: 'partial', stats: {} }; },
+  }));
+  assert.equal(persisted, 1);
+  assert.notEqual(out.status, 'paused_for_today');
+});
+
+test('시작 전 점검: 오늘 남은 호출이 7 미만이면 기관을 시작하지 않고 일시 중지한다(기관·시도 횟수 불변)', async () => {
+  const db = makeDb({ usage: 994 }); // 기본 한도 1000 → 남은 6 < 7
+  let clients = 0;
+  let collected = 0;
+  const out = await runEnrichmentItem(deps(db, {
+    createClient: () => { clients += 1; return {}; },
+    collect: async () => { collected += 1; return { _normalizedAll: [] }; },
+  }));
+  assert.deepEqual(out, { ok: true, status: 'paused_for_today', didWork: false, phase: 'enrichment' });
+  assert.equal(clients, 0);
+  assert.equal(collected, 0);
+  assert.equal(db.items[0].status, 'pending');
+  assert.equal(db.items[0].attempt_count, 0);
+  assert.equal(db.jobs[0].status, 'paused_for_today');
+  assert.equal(db.jobs[0].last_error_code, 'quota_exhausted');
+  assert.equal(db.calls.some((c) => c.path.startsWith('rpc/hospital_hira_reserve_daily_calls')), false);
+});
+
+test('시작 전 점검: 남은 호출이 정확히 7이면 시작한다 / 요청 한도(dailyCallCap)를 따르고 절대 상한 2000 을 넘지 않는다', async () => {
+  const ok = await runEnrichmentItem(deps(makeDb({ usage: 993 })));
+  assert.equal(ok.status, 'item_complete', '1000-993=7 → 시작');
+
+  const blocked = await runEnrichmentItem(deps(makeDb({ usage: 595 }), { dailyCallCap: 600 }));
+  assert.equal(blocked.status, 'paused_for_today', '600-595=5 < 7');
+
+  const capped = await runEnrichmentItem(deps(makeDb({ usage: 1996 }), { dailyCallCap: 999_999 }));
+  assert.equal(capped.status, 'paused_for_today', '상한 2000-1996=4 < 7');
+});
+
+test('시작 전 점검: 사용량 행이 없거나(오늘 첫 호출) 읽기에 실패하면 막지 않고 진행한다', async () => {
+  const none = await runEnrichmentItem(deps(makeDb()));
+  assert.equal(none.status, 'item_complete');
+  const failing = await runEnrichmentItem(deps(makeDb({ usageFails: true })));
+  assert.equal(failing.status, 'item_complete', '읽기 실패는 막지 않음 — 한도는 호출마다 예약 RPC 가 강제');
+});
+
+test('시작 전 점검은 "남은 항목 없음" 마감을 막지 않는다(호출이 필요 없음)', async () => {
+  const db = makeDb({ items: [], usage: 1000 });
+  const out = await runEnrichmentItem(deps(db));
+  assert.equal(out.status, 'enrichment_complete');
+  assert.equal(db.jobs[0].status, 'completed');
+});
+
+test('한도로 멈춘 기관은 같은 날 다음 tick 에선 호출 0, 다음 KST 날짜에 같은 job 에서 먼저 재처리돼 완료된다', async () => {
+  const db = makeDb();
+  const first = await runEnrichmentItem(deps(db, {
+    createClient: plannedClient(1),
+    collect: swallowingCollect(['getDetailInfo']),
+  }));
+  assert.equal(first.status, 'paused_for_today');
+
+  let clients = 0;
+  const sameDay = await runEnrichmentItem(deps(db, { now: () => NOW + 3_600_000, createClient: () => { clients += 1; return {}; } }));
+  assert.equal(sameDay.status, 'paused_for_today');
+  assert.equal(clients, 0, '같은 날에는 HIRA 호출 0');
+
+  const nextDay = await runEnrichmentItem(deps(db, { now: () => NOW + 25 * 3_600_000 }));
+  assert.equal(nextDay.status, 'item_complete');
+  assert.equal(db.items[0].status, 'completed');
+  assert.equal(db.items[0].attempt_count, 1, '한도로 멈춘 시도는 세지 않으므로 완료 시점 시도는 1');
+  assert.equal(db.jobs.length, 1);
 });
 
 test('강제종료 뒤 stale processing item은 lease 만료 뒤 재처리한다', async () => {
