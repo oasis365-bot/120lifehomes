@@ -23,12 +23,11 @@ window.toggleMenu = function () {
 function mountChrome(activePage) {
   const header = `
   <div class="access-bar"><div class="wrap">
-    <span>어르신도 보기 편한 큰 글씨 지원</span>
-    <div class="fs-controls">
-      <span>글자 크기</span>
-      <button onclick="setFontSize('normal')">가</button>
-      <button onclick="setFontSize('large')" style="font-size:1.05rem">가</button>
-      <button onclick="setFontSize('xlarge')" style="font-size:1.2rem">가</button>
+    <p class="access-msg"><span>어르신들도 보기 편한</span> <span>글자 크기 선택하기</span></p>
+    <div class="fs-controls" role="group" aria-label="글자 크기 선택">
+      <button type="button" onclick="setFontSize('normal')" aria-label="글자 크기 기본">가</button>
+      <button type="button" onclick="setFontSize('large')" aria-label="글자 크기 크게" style="font-size:1.05rem">가</button>
+      <button type="button" onclick="setFontSize('xlarge')" aria-label="글자 크기 아주 크게" style="font-size:1.2rem">가</button>
     </div>
   </div></div>
   <header class="site"><div class="wrap">
@@ -113,7 +112,7 @@ const _typeEmoji = {
 function typeEmoji(t) { return _typeEmoji[t] || "🏢"; }
 
 /* 유형 → 브랜드 일러스트/아이콘 파일 슬러그 */
-const ASSET_V = "20260901i";
+const ASSET_V = "20261120a";
 const _typeSlug = {
   "노인요양시설": "nursing", "노인요양공동생활가정": "group", "주야간보호": "daycare",
   "단기보호": "short", "방문요양": "homecare", "방문간호": "nurse", "방문목욕": "bath",
