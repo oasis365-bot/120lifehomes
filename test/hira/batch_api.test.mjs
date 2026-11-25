@@ -442,3 +442,46 @@ test('정적 계약: query 인증/제어 없음, 기존 3건 ingest와 LTC 파�
   assert.doesNotMatch(code, /req\.query|\?secret=|api\/hospital\/ingest/);
   assert.doesNotMatch(src, /api\/facilities|api\/ingest|api\/enrich/);
 });
+
+test('연결 점검: 주입된 결과를 allowlist·정수만 응답에 싣고, 점검 실패는 수집을 막지 않는다', async () => {
+  const mk = (probe) => createHandler({
+    env: env(), sbImpl: async () => ({ data: [] }), assertDb: async () => ({ ok: true }),
+    runDiscovery: async () => ({ ok: true, status: 'phase_complete', didWork: false, phase: 'enrichment' }),
+    runEnrichment: async () => ({ ok: true, status: 'enrichment_complete', didWork: false, phase: 'done' }),
+    createClient: () => ({}), now: () => 1_000, uuid: () => 'owner', probe,
+  });
+  let out = res();
+  await mk(async () => ({ result: 'ok', tcpMs: 180, tlsMs: 420 }))(req(), out);
+  assert.equal(out.payload.netProbe, 'ok');
+  assert.equal(out.payload.netTcpMs, 180);
+  assert.equal(out.payload.netTlsMs, 420);
+
+  out = res();
+  await mk(async () => ({ result: 'connect_timeout', tcpMs: null, tlsMs: null }))(req(), out);
+  assert.equal(out.payload.netProbe, 'connect_timeout');
+  assert.equal(out.payload.netTcpMs, null);
+
+  out = res();
+  await mk(async () => ({ result: 'connect 1.2.3.4 secret', tcpMs: 1, tlsMs: 2 }))(req(), out);
+  assert.equal('netProbe' in out.payload, false, 'allowlist 밖 결과는 싣지 않음');
+  assert.doesNotMatch(JSON.stringify(out.payload), /secret|1\.2\.3\.4/);
+
+  out = res();
+  await mk(async () => { throw new Error('probe boom'); })(req(), out);
+  assert.equal(out.code, 200);
+  assert.equal('netProbe' in out.payload, false);
+});
+
+test('연결 점검은 enrichment 단계에서만 돈다(discovery 페이지 처리 땐 안 돔)', async () => {
+  let probed = 0;
+  const h = createHandler({
+    env: env(), sbImpl: async () => ({ data: [] }), assertDb: async () => ({ ok: true }),
+    runDiscovery: async () => ({ ok: true, status: 'page_complete', didWork: true, phase: 'discovery', page: 1, added: 3 }),
+    runEnrichment: async () => { throw new Error('not reached'); },
+    createClient: () => ({}), now: () => 1_000, uuid: () => 'owner',
+    probe: async () => { probed += 1; return { result: 'ok', tcpMs: 1, tlsMs: 2 }; },
+  });
+  const out = res();
+  await h(req(), out);
+  assert.equal(probed, 0);
+});

@@ -127,6 +127,13 @@ export function summarize(result) {
     attempted: b.attempted ?? 0, completed: b.completed ?? 0,
     retried: b.retried ?? 0, deadLettered: b.deadLettered ?? 0,
   };
+  // 연결 점검 결과(있을 때만): 시간 초과가 연결 단계인지 응답 대기인지 Actions 로그에서 보이게.
+  if (Number.isInteger(b.timedOut) && b.timedOut > 0) safe.timedOut = b.timedOut;
+  if (typeof b.netProbe === 'string' && /^[a-z_]{1,20}$/.test(b.netProbe)) {
+    safe.netProbe = b.netProbe;
+    safe.netTcpMs = Number.isInteger(b.netTcpMs) ? b.netTcpMs : null;
+    safe.netTlsMs = Number.isInteger(b.netTlsMs) ? b.netTlsMs : null;
+  }
   return {
     line: `enrichment batch tick ok: ${JSON.stringify(safe)}`,
     exitCode: 0,
