@@ -247,7 +247,7 @@ test('조회는 병렬 4개, facility_sources 는 진료과 칸 1개만, ingesti
     assert.equal(tables.filter((x) => x === t).length, 1, t);
   }
   const src = sb.calls.find((c) => c.table === 'facility_sources');
-  assert.equal(src.params.select, 'departments:raw->>departments');
+  assert.equal(src.params.select, 'departments:raw->>departments,fetched_at');
   assert.ok(src.filters.some((f) => f.col === 'source_system' && f.op === 'eq' && f.val === 'hira_hospital_ingest'));
   assert.equal(sb.calls.some((c) => c.table === 'ingestion_runs'), false);
   // 전부 GET (write 0)
@@ -268,7 +268,7 @@ test('detail_status: 진료과 칸이 배열이면 collected(0개 포함), 없�
     await H({ sb: seededSb(extra) })(mkReq({ query: { id: HID } }), res);
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.detail_status, want, String(dep));
-    assert.deepEqual(Object.keys(res.body).sort(), ['detail_status', 'evaluation', 'facility', 'profile']);
+    assert.deepEqual(Object.keys(res.body).sort(), ['data_date', 'detail_status', 'evaluation', 'facility', 'profile']);
     const blob = JSON.stringify(res.body);
     assert.equal(/RAWYK|JDQ4_RAW_YKIHO|dgsbjtCdNm|원문주소|normalized_hash/.test(blob), false);
   }
@@ -322,7 +322,7 @@ test('정적: 공개 whitelist 가 코드에 상수로 명시됨', () => {
   // facility_sources 는 진료과 칸 1개 select 로만, ingestion_runs 조회 없음
   const srcCalls = src.match(/sb\(`facility_sources[^`]*`/g) || [];
   assert.equal(srcCalls.length, 1);
-  assert.ok(srcCalls[0].includes('&select=departments:raw->>departments&limit=1'));
+  assert.ok(srcCalls[0].includes('&select=departments:raw->>departments,fetched_at&limit=1'));
   assert.equal(/sb\(`?ingestion_runs/.test(src), false);
 });
 
@@ -331,4 +331,26 @@ test('정적: 신규 endpoint 는 기존 LTC api/facility.js 를 import·수정�
   assert.equal(src.includes("'../facility.js'"), false);
   assert.equal(src.includes('../../api/facility'), false);
   // LTC 핵심 파일은 이 브랜치에서 바뀌지 않음(바이트 동일)은 CI diff 로 별도 확인
+});
+
+test('data_date: 자료 받은 시각을 한국 날짜로만 알린다(없거나 이상하면 null, 추정 안 함)', async () => {
+  const cases = [
+    ['2026-09-23T03:00:00.000Z', '2026-09-23'],
+    ['2026-10-17T16:30:00+00:00', '2026-10-18'], // UTC 16:30 = 한국 다음 날 01:30
+    [null, null],
+    ['not-a-date', null],
+    [undefined, null],
+  ];
+  for (const [fa, want] of cases) {
+    const row = { facility_id: HID, source_system: 'hira_hospital_ingest', departments: '[]', raw: { x: 1 }, external_id: 'RAWYK' };
+    if (fa !== undefined) row.fetched_at = fa;
+    const res = mkRes();
+    // eslint-disable-next-line no-await-in-loop
+    await H({ sb: seededSb({ facility_sources: [row] }) })(mkReq({ query: { id: HID } }), res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.data_date, want, String(fa));
+  }
+  const res = mkRes();
+  await H({ sb: seededSb({ facility_sources: [] }) })(mkReq({ query: { id: HID } }), res);
+  assert.equal(res.body.data_date, null, '출처 행 없음');
 });
