@@ -82,13 +82,17 @@ export function createHandler(deps = {}) {
       return;
     }
 
-    // 병렬 read (N+1 없음). facility_sources / ingestion_runs 는 조회하지 않는다.
+    // 병렬 read (N+1 없음). ingestion_runs 는 조회하지 않는다.
+    //  facility_sources 는 "상세정보를 받았는지" 판단용으로 HIRA 원본의 진료과 목록 칸
+    //  (raw->>departments, 텍스트) 하나만 읽고, 응답에는 detail_status 값만 내보낸다.
+    //  원문·요양기호·주소는 응답에 넣지 않는다.
     let results;
     try {
       results = await Promise.all([
         sb(`facilities?id=eq.${enc(id)}&domain=eq.HOSPITAL&select=${FACILITY_PUBLIC.join(',')}&limit=1`),
         sb(`hospital_profiles?facility_id=eq.${enc(id)}&select=${PROFILE_SELECT.join(',')}&limit=1`),
         sb(`facility_evaluations?facility_id=eq.${enc(id)}&select=${EVALUATION_PUBLIC.join(',')}&order=collected_at.desc,id.desc&limit=1`),
+        sb(`facility_sources?facility_id=eq.${enc(id)}&source_system=eq.hira_hospital_ingest&select=departments:raw->>departments&limit=1`),
       ]);
     } catch (e) {
       // 내부 원문(쿼리·id·비밀) 미노출. 로그도 에러 클래스만.
@@ -101,6 +105,7 @@ export function createHandler(deps = {}) {
     const facData = results[0] && results[0].data;
     const profData = results[1] && results[1].data;
     const evalData = results[2] && results[2].data;
+    const srcData = results[3] && results[3].data;
 
     const facRow = Array.isArray(facData) ? facData[0] : null;
     if (!facRow) {
@@ -118,7 +123,12 @@ export function createHandler(deps = {}) {
     const profile = profRow ? pick(profRow, PROFILE_PUBLIC) : null;
     const evaluation = evalRow ? pick(evalRow, EVALUATION_PUBLIC) : null;
 
-    res.status(200).json({ facility, profile, evaluation });
+    // collected: HIRA 진료과 목록 칸이 배열로 저장됨(0개여도 받은 것) / not_collected: 그 외(미수집)
+    const srcRow = (Array.isArray(srcData) && srcData[0]) || null;
+    const dep = srcRow && typeof srcRow.departments === 'string' ? srcRow.departments.trim() : '';
+    const detail_status = dep.startsWith('[') ? 'collected' : 'not_collected';
+
+    res.status(200).json({ facility, profile, evaluation, detail_status });
   };
 }
 

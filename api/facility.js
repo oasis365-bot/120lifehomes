@@ -16,7 +16,16 @@ export default async function handler(req, res) {
     return;
   }
 
+  // 요양원 상세 API 는 요양병원 행을 돌려주지 않는다(스위치 ON/OFF 무관).
+  //  요양병원 상세는 /api/hospital/facility 전용. 병원 id 는 계약상 항상 "H-" 로 시작한다.
+  if (id.startsWith('H-')) {
+    res.status(404).json({ error: 'not_found' });
+    return;
+  }
+
   const { flags, schemaReady } = await getFlags();
+  // 001 적용 후에는 domain 으로도 한 번 더 요양원만 고정한다.
+  const ltcOnly = schemaReady ? '&domain=eq.LTC' : '';
   const cols =
     schemaReady && flagOn(flags, 'hospital_module')
       ? `${FACILITY_PUBLIC_COLUMNS},domain`
@@ -24,7 +33,7 @@ export default async function handler(req, res) {
 
   try {
     const { data } = await sb(
-      `facilities?id=eq.${encodeURIComponent(id)}&select=${cols}&limit=1`
+      `facilities?id=eq.${encodeURIComponent(id)}${ltcOnly}&select=${cols}&limit=1`
     );
     const item = Array.isArray(data) ? data[0] : null;
     if (!item) {
