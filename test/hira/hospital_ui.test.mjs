@@ -771,3 +771,27 @@ test('통합: 검색 상태 q/지역 길이·page 상한이 생성 URL 에 반�
   assert.ok(sp.get('sido').length <= 60, 'sido 60자 이하');
   assert.ok(Number(sp.get('page')) <= 10000, 'page 10000 이하: ' + sp.get('page'));
 });
+
+test('renderDetail: 자료 기준 — 수집일이 있으면 날짜와 확인 안내, 없으면 추정 없이 "확인하지 못했습니다"', () => {
+  const UI = loadUI(makeDoc());
+  const base = { facility: { id: 'H-1', name: '기준요양병원' }, profile: null, evaluation: null, detail_status: 'collected' };
+  let cont = makeDoc().createElement('div');
+  UI.renderDetail(cont, { ...base, data_date: '2026-09-23' }, {});
+  let txt = cont.textContent;
+  assert.ok(txt.includes('자료 기준'));
+  assert.ok(txt.includes('자료 수집일'));
+  assert.ok(txt.includes('2026.09.23'));
+  assert.ok(txt.includes('해당 병원에 확인'));
+  cont = makeDoc().createElement('div');
+  UI.renderDetail(cont, { ...base, data_date: null }, {});
+  txt = cont.textContent;
+  assert.ok(txt.includes('자료 수집일을 확인하지 못했습니다'));
+  assert.equal(/\d{4}\.\d{2}\.\d{2}/.test(txt), false, '날짜를 지어내지 않음');
+});
+
+test('hospital.html: 목록에 자료 출처·확인 안내 한 줄', () => {
+  const html = readFileSync(new URL('../../hospital.html', import.meta.url), 'utf8');
+  assert.ok(html.includes('data-h="datanote"'));
+  assert.ok(html.includes('건강보험심사평가원 공개 자료'));
+  assert.ok(html.includes('병원별 자료 수집일은 상세 화면'));
+});

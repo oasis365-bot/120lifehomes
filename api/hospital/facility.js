@@ -39,6 +39,13 @@ const EVALUATION_PUBLIC = Object.freeze([
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9=_./+-]{2,255}$/;
 
 const enc = (v) => encodeURIComponent(String(v));
+// timestamptz → 한국 날짜(YYYY-MM-DD). 값이 없거나 날짜로 읽히지 않으면 null.
+const kstDate = (v) => {
+  if (typeof v !== 'string' || !v) return null;
+  const t = Date.parse(v);
+  if (!Number.isFinite(t)) return null;
+  return new Date(t + 9 * 3600 * 1000).toISOString().slice(0, 10);
+};
 const pick = (row, keys) => {
   const out = {};
   for (const k of keys) out[k] = row[k] === undefined ? null : row[k];
@@ -92,7 +99,7 @@ export function createHandler(deps = {}) {
         sb(`facilities?id=eq.${enc(id)}&domain=eq.HOSPITAL&select=${FACILITY_PUBLIC.join(',')}&limit=1`),
         sb(`hospital_profiles?facility_id=eq.${enc(id)}&select=${PROFILE_SELECT.join(',')}&limit=1`),
         sb(`facility_evaluations?facility_id=eq.${enc(id)}&select=${EVALUATION_PUBLIC.join(',')}&order=collected_at.desc,id.desc&limit=1`),
-        sb(`facility_sources?facility_id=eq.${enc(id)}&source_system=eq.hira_hospital_ingest&select=departments:raw->>departments&limit=1`),
+        sb(`facility_sources?facility_id=eq.${enc(id)}&source_system=eq.hira_hospital_ingest&select=departments:raw->>departments,fetched_at&limit=1`),
       ]);
     } catch (e) {
       // 내부 원문(쿼리·id·비밀) 미노출. 로그도 에러 클래스만.
@@ -128,7 +135,11 @@ export function createHandler(deps = {}) {
     const dep = srcRow && typeof srcRow.departments === 'string' ? srcRow.departments.trim() : '';
     const detail_status = dep.startsWith('[') ? 'collected' : 'not_collected';
 
-    res.status(200).json({ facility, profile, evaluation, detail_status });
+    // data_date: 이 병원의 HIRA 공개 자료를 받은 날(한국 날짜 YYYY-MM-DD). 원본에 기준일 칸이
+    //  없어(source_date 는 항상 null) 수집일을 그대로 알린다. 형식이 이상하면 null(추정하지 않음).
+    const data_date = kstDate(srcRow && srcRow.fetched_at);
+
+    res.status(200).json({ facility, profile, evaluation, detail_status, data_date });
   };
 }
 

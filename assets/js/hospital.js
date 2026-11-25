@@ -89,6 +89,8 @@
   // 상세정보 상태 문구(대표 확정 문구 — 바꾸지 말 것)
   var DETAIL_NOT_COLLECTED_TEXT = '상세정보를 아직 확인하지 못했습니다';
   var EVAL_NONE_TEXT = '제공된 자료에 평가 결과가 없습니다';
+  var DATA_NOTE_TEXT = '건강보험심사평가원 공개 자료를 받아 보여 드립니다. 그 뒤 바뀐 내용은 반영되지 않았을 수 있으니, 방문·입원 전에 해당 병원에 확인해 주세요.';
+  var DATA_DATE_UNKNOWN_TEXT = '자료 수집일을 확인하지 못했습니다.';
 
   // 목록 API 요청 URL — 사용자 입력은 URLSearchParams 값으로만 전달
   //  expand(선택): { sido: [원본 이름…], sigungu: [원본 이름…] } — 같은 공식 코드로 묶인
@@ -376,6 +378,13 @@
     } else if (data.detail_status === 'collected' && !hasEval) {
       root.appendChild(section('적정성평가', [el('p', { className: 'h-note', text: EVAL_NONE_TEXT })]));
     }
+
+    // 자료 기준 — 원본에 기준일 칸이 없어 "받은 날"을 그대로 알린다. 날짜가 없으면 추정하지 않는다.
+    var dataDate = fmtDate(data.data_date);
+    var dataChildren = [];
+    if (dataDate) dataChildren.push(table([specRow('자료 수집일', dataDate)]));
+    dataChildren.push(el('p', { className: 'h-note', text: dataDate ? DATA_NOTE_TEXT : DATA_DATE_UNKNOWN_TEXT + ' ' + DATA_NOTE_TEXT }));
+    root.appendChild(section('자료 기준', dataChildren));
 
     // 목록으로 돌아가기
     var backHref = hasValue(opts.backSearch) ? ('hospital.html' + opts.backSearch) : 'hospital.html';
