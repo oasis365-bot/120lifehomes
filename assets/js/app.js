@@ -20,6 +20,8 @@ window.toggleMenu = function () {
 };
 
 /* ---------- 공통 헤더/푸터 주입 ---------- */
+// 자매 사이트(생활뉴스) 주소. 추적용 파라미터는 붙이지 않는다.
+const NEWS_URL = "https://120lifenews.co.kr/";
 function mountChrome(activePage) {
   const header = `
   <div class="access-bar"><div class="wrap">
@@ -40,7 +42,7 @@ function mountChrome(activePage) {
       <li><a href="search.html" data-p="search">시설 찾기</a></li>
       <li><a href="guide.html" data-p="guide">돌봄 가이드</a></li>
       <li><a href="consult.html" data-p="consult">무료 입소 상담</a></li>
-      <li><a href="consult.html" class="cta">전화 상담 1600-0000</a></li>
+      <li><a href="${NEWS_URL}" rel="noopener">120 LIFE NEWS · 생활뉴스</a></li>
     </ul></nav>
   </div></header>`;
 
@@ -55,7 +57,6 @@ function mountChrome(activePage) {
       <div>
         <h4>120 라이프홈즈</h4>
         <p>우리 가족에게 맞는 요양시설을, 전국 어디서나 쉽고 투명하게 찾을 수 있도록 돕는 요양시설 검색 플랫폼입니다.</p>
-        <p style="margin-top:10px">고객센터 <strong style="color:#fff">1600-0000</strong> (평일 09:00–18:00)</p>
       </div>
       <div><h4>시설 찾기</h4><ul>
         <li><a href="search.html?type=%EB%85%B8%EC%9D%B8%EC%9A%94%EC%96%91%EC%8B%9C%EC%84%A4">노인요양시설(요양원)</a></li>
@@ -73,6 +74,7 @@ function mountChrome(activePage) {
       <div><h4>회사</h4><ul>
         <li><a href="about.html">회사 소개</a></li>
         <li><a href="consult.html">시설 등록·제휴 문의</a></li>
+        <li><a href="${NEWS_URL}" rel="noopener">120 LIFE NEWS · 생활뉴스</a></li>
         <li><a href="terms.html">이용약관</a></li>
         <li><a href="privacy.html"><strong>개인정보처리방침</strong></a></li>
       </ul></div>
@@ -80,8 +82,8 @@ function mountChrome(activePage) {
     <div class="disclaimer">
       <p style="margin-bottom:10px">
         <strong style="color:#fff">트로피컬리퍼블릭 주식회사</strong> &nbsp;|&nbsp; 사업자등록번호 120-87-70572 &nbsp;|&nbsp;
-        대표 <span style="color:#8a949c">[대표자명]</span> &nbsp;|&nbsp; 통신판매업신고 <span style="color:#8a949c">[신고번호]</span><br>
-        서울특별시 강남구 테헤란로63길 12, B-322 &nbsp;|&nbsp; 고객센터 1600-0000 (평일 09:00–18:00)
+        대표 박강민<br>
+        서울특별시 강남구 테헤란로63길 12, B-322
       </p>
       시설 정보는 <strong>국민건강보험공단</strong>이 공공데이터포털을 통해 제공하는 「장기요양기관」 데이터를 기반으로 하며 매일 갱신됩니다.
       전화·정원·평가등급 등 일부 항목은 순차 보강 중이며, 최신·정확한 정보는 해당 기관 또는
