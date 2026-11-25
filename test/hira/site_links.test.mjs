@@ -40,11 +40,15 @@ test('메뉴(PC·모바일 공용 nav.main)와 푸터에 NEWS 링크가 하나�
 
 test('NEWS 링크에 추적 파라미터·새 창 강제·배너가 없다', () => {
   const src = read('assets/js/app.js');
-  assert.ok(!/utm_|fbclid|gclid|ref=/.test(src), '추적 파라미터 없음');
+  assert.ok(!/utm_|fbclid|gclid/.test(src), '추적 파라미터 없음');
   const { header, footer } = renderChrome();
   for (const html of [header, footer]) {
     const tags = html.match(/<a [^>]*120lifenews[^>]*>/g) || [];
-    for (const t of tags) assert.ok(!/target=/.test(t), '새 창 강제 없음');
+    assert.ok(tags.length >= 1);
+    for (const t of tags) {
+      assert.ok(t.includes('href="https://120lifenews.co.kr/"'), '주소에 쿼리·추가 경로 없음');
+      assert.ok(!/target=|onclick=/.test(t), '새 창 강제·클릭 추적 없음');
+    }
   }
 });
 
