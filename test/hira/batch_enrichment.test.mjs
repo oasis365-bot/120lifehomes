@@ -422,3 +422,15 @@ test('lease 가 아직 유효한 processing 항목만 남아도 job을 닫지 �
   assert.equal(db.jobs[0].phase, 'enrichment');
   assert.equal(db.jobs[0].status, 'pending');
 });
+
+test('재시도 시각이 지난 retry_wait 보다 아직 시도 안 한 pending 을 먼저 처리한다(같은 기관 반복 방지)', async () => {
+  const db = makeDb({ items: [
+    item({ id: 'stuck', ordinal: 0, status: 'retry_wait', attempt_count: 1, next_retry_at: new Date(NOW - 60_000).toISOString() }),
+    item({ id: 'fresh', ordinal: 1, status: 'pending', attempt_count: 0 }),
+  ] });
+  const out = await runEnrichmentItem(deps(db));
+  assert.equal(out.status, 'item_complete');
+  assert.equal(db.items.find((x) => x.id === 'fresh').status, 'completed');
+  assert.equal(db.items.find((x) => x.id === 'stuck').status, 'retry_wait');
+  assert.equal(db.items.find((x) => x.id === 'stuck').attempt_count, 1);
+});
