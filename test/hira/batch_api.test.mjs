@@ -150,7 +150,7 @@ test('discovery 완료 뒤에는 같은 안전한 실행 계약으로 enrichment
   assert.equal(enrichCalls, 2);
   assert.deepEqual(out.payload, {
     ok: true, status: 'enrichment_complete', didWork: false, phase: 'done',
-    attempted: 1, completed: 1, retried: 0, deadLettered: 0,
+    attempted: 1, completed: 1, retried: 0, deadLettered: 0, timedOut: 0,
   });
 });
 
@@ -180,7 +180,7 @@ test('enrichment 루프: item을 여러 개 이어서 처리하고(중복 없이
   assert.equal(calls, outcomes.length + 1); // 4개 처리 + 마지막 "더 없음" 확인 1회
   assert.deepEqual(out.payload, {
     ok: true, status: 'enrichment_complete', didWork: false, phase: 'done',
-    attempted: 4, completed: 2, retried: 1, deadLettered: 1,
+    attempted: 4, completed: 2, retried: 1, deadLettered: 1, timedOut: 0,
   });
 });
 
@@ -202,7 +202,7 @@ test('enrichment 루프: 일일 HIRA 호출 한도 도달(paused_for_today)이�
   assert.equal(out.payload.status, 'paused_for_today');
   assert.deepEqual(out.payload, {
     ok: true, status: 'paused_for_today', didWork: false, phase: 'enrichment',
-    attempted: 2, completed: 2, retried: 0, deadLettered: 0,
+    attempted: 2, completed: 2, retried: 0, deadLettered: 0, timedOut: 0,
   });
 });
 
@@ -218,7 +218,7 @@ test('enrichment 루프: 다른 프로세스가 lease를 쥐고 있으면(busy) 
   await h(req(), out);
   assert.equal(calls, 1);
   assert.deepEqual(out.payload, {
-    ok: true, status: 'busy', didWork: false, phase: 'enrichment', attempted: 0, completed: 0, retried: 0, deadLettered: 0,
+    ok: true, status: 'busy', didWork: false, phase: 'enrichment', attempted: 0, completed: 0, retried: 0, deadLettered: 0, timedOut: 0,
   });
 });
 
@@ -297,7 +297,7 @@ test('enrichment 루프(기본 180초 예산): 일일 한도(paused_for_today)�
   assert.equal(calls, 3, '한도 응답 뒤에는 더 호출하지 않음(남은 시간 ≈ 180초)');
   assert.deepEqual(out.payload, {
     ok: true, status: 'paused_for_today', didWork: false, phase: 'enrichment',
-    attempted: 2, completed: 2, retried: 0, deadLettered: 0,
+    attempted: 2, completed: 2, retried: 0, deadLettered: 0, timedOut: 0,
   });
 });
 
@@ -315,6 +315,43 @@ test('enrichment 루프: HIRA deadline(시간 초과) 오류가 나면 그 자�
   assert.equal(out.code, 503);
   assert.deepEqual(out.payload, { error: 'batch_failed' });
   assert.equal(calls, 3, '오류 이후 새 기관 시작 0 — 해당 기관의 retry 처리는 runEnrichmentItem 이 담당');
+});
+
+test('enrichment 루프: 기관 1곳 시간 초과(timedOut)는 그 기관만 재시도 대기, 다음 기관으로 넘어가 200', async () => {
+  const plan = ['item_complete', 'timeout', 'item_complete', 'stop'];
+  let calls = 0;
+  const { handler } = defaultBudgetHandler({
+    makeRun: () => async () => {
+      const step = plan[calls]; calls += 1;
+      if (step === 'timeout') return { ok: true, status: 'item_retry', didWork: true, phase: 'enrichment', timedOut: true };
+      if (step === 'stop') return { ok: true, status: 'enrichment_complete', didWork: false, phase: 'done' };
+      return { ok: true, status: step, didWork: true, phase: 'enrichment' };
+    },
+  });
+  const out = res();
+  await handler(req(), out);
+  assert.equal(out.code, 200);
+  assert.equal(calls, 4);
+  assert.deepEqual(out.payload, {
+    ok: true, status: 'enrichment_complete', didWork: false, phase: 'done',
+    attempted: 3, completed: 2, retried: 1, deadLettered: 0, timedOut: 1,
+  });
+});
+
+test('enrichment 루프: 시간 초과가 연속 2곳이면 이번 요청을 멈춘다(HIRA 지연 시 호출 낭비 방지)', async () => {
+  let calls = 0;
+  const { handler } = defaultBudgetHandler({
+    makeRun: () => async () => {
+      calls += 1;
+      return { ok: true, status: 'item_retry', didWork: true, phase: 'enrichment', timedOut: true };
+    },
+  });
+  const out = res();
+  await handler(req(), out);
+  assert.equal(out.code, 200);
+  assert.equal(calls, 2);
+  assert.equal(out.payload.timedOut, 2);
+  assert.equal(out.payload.retried, 2);
 });
 
 test('enrichment 루프: item 수 안전 상한(batchMaxItems)을 넘기면 시간이 남아도 멈춘다', async () => {
@@ -348,7 +385,7 @@ test('singleItemTest:true — 시간이 남아도, 다른 batchMaxItems 설정�
   assert.equal(calls, 1, 'singleItemTest여도 여러 번 불리면 실제 데이터 처리 범위를 못 지킨 것');
   assert.deepEqual(out.payload, {
     ok: true, status: 'item_complete', didWork: true, phase: 'enrichment',
-    attempted: 1, completed: 1, retried: 0, deadLettered: 0,
+    attempted: 1, completed: 1, retried: 0, deadLettered: 0, timedOut: 0,
   });
 });
 
