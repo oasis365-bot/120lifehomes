@@ -113,14 +113,15 @@ test('쿼터/429 오류는 당일 pause하고 dead_letter로 보내지 않는다
   assert.equal(db.jobs[0].status, 'paused_for_today');
 });
 
-test('기관 처리 중 HIRA deadline(시간 초과)이면 dead_letter 가 아니라 retry_wait 로 되돌려 나중에 재시도한다', async () => {
+test('기관 처리 중 HIRA deadline(시간 초과)이면 그 기관만 retry_wait 로 두고, 오류를 던지지 않고 결과로 알린다', async () => {
   const db = makeDb();
-  await assert.rejects(
-    () => runEnrichmentItem(deps(db, {
-      collect: async () => { throw new HiraError('deadline', { reason: 'deadline', failureKind: 'deadline' }); },
-    })),
-    /deadline/,
-  );
+  let persisted = 0;
+  const out = await runEnrichmentItem(deps(db, {
+    collect: async () => { throw new HiraError('deadline', { reason: 'deadline', failureKind: 'deadline' }); },
+    persist: async () => { persisted += 1; return { status: 'ok', stats: {} }; },
+  }));
+  assert.deepEqual(out, { ok: true, status: 'item_retry', didWork: true, phase: 'enrichment', timedOut: true });
+  assert.equal(persisted, 0, '시간 초과 기관은 저장하지 않는다(기존 값 보존)');
   assert.equal(db.items[0].status, 'retry_wait');
   assert.equal(db.items[0].attempt_count, 1);
   assert.equal(db.items[0].last_error_code, 'deadline');
@@ -128,6 +129,50 @@ test('기관 처리 중 HIRA deadline(시간 초과)이면 dead_letter 가 아�
   assert.equal(db.jobs[0].count_dead_letter, 0);
   assert.equal(db.jobs[0].count_partial, 1);
   assert.equal(db.jobs[0].status, 'pending', '일일 한도 pause 가 아니라 일반 재시도');
+});
+
+test('시간 초과도 재시도 상한은 그대로: 세 번째 시간 초과는 dead_letter', async () => {
+  const db = makeDb({ items: [item({ attempt_count: 2 })] });
+  const out = await runEnrichmentItem(deps(db, {
+    collect: async () => { throw new HiraError('deadline', { reason: 'deadline', failureKind: 'deadline' }); },
+  }));
+  assert.deepEqual(out, { ok: true, status: 'item_dead_letter', didWork: true, phase: 'enrichment', timedOut: true });
+  assert.equal(db.items[0].status, 'dead_letter');
+  assert.equal(db.items[0].attempt_count, 3);
+  assert.equal(db.jobs[0].count_dead_letter, 1);
+});
+
+test('시간 초과가 아닌 오류는 기존처럼 던진다(요청 실패)', async () => {
+  const db = makeDb();
+  await assert.rejects(() => runEnrichmentItem(deps(db, { collect: async () => { throw new Error('boom'); } })), /boom/);
+  assert.equal(db.items[0].status, 'retry_wait');
+});
+
+test('호출 기록: 호출 종류·시도·ms·결과만 로그 한 줄, 키·주소·요양기호 없음', async () => {
+  const db = makeDb();
+  const lines = [];
+  const orig = console.info;
+  console.info = (...a) => { lines.push(a.join(' ')); };
+  try {
+    await runEnrichmentItem(deps(db, {
+      createClient: (opt) => ({ opt }),
+      collect: async (client) => {
+        client.opt.onCall({ op: 'getDtlInfo2.8', attempt: 1, ms: 7003, outcome: 'timeout' });
+        client.opt.onCall({ op: 'getDtlInfo2.8', attempt: 2, ms: 6990, outcome: 'timeout' });
+        throw new HiraError('deadline', { reason: 'deadline', failureKind: 'deadline' });
+      },
+    }));
+  } finally {
+    console.info = orig;
+  }
+  const log = lines.find((l) => l.includes('hira_calls'));
+  assert.ok(log, '로그 없음');
+  const rows = JSON.parse(log.slice(log.indexOf('[', log.indexOf('hira_calls'))));
+  assert.deepEqual(rows, [
+    { op: 'getDtlInfo2.8', attempt: 1, ms: 7003, outcome: 'timeout' },
+    { op: 'getDtlInfo2.8', attempt: 2, ms: 6990, outcome: 'timeout' },
+  ]);
+  assert.doesNotMatch(log, /test-key|TEST123|serviceKey|https?:|ykiho/i);
 });
 
 test('일일 HIRA 호출 한도 보호 유지: 호출마다 예약 RPC 를 거치고, 기본 1000·절대 상한 2000', async () => {
