@@ -419,8 +419,9 @@ test('정적: 공개 whitelist 가 코드에 상수로 명시됨', () => {
   for (const bad of ['hira_ykiho', 'external_id', 'normalized_hash', 'monthly_fee', 'is_partner', 'raw']) {
     assert.equal(new RegExp(`PUBLIC[^]*?'${bad}'`).test(codeOnly), false, `whitelist 에 ${bad}`);
   }
-  // facility_sources / ingestion_runs 조회 없음
-  assert.equal(/facility_sources/.test(codeOnly), false);
+  // facility_sources 는 view=regions 의 공식 코드 2개(json 경로)만 읽는다. ingestion_runs 조회 없음.
+  assert.equal((codeOnly.match(/facility_sources/g) || []).length, 1, 'facility_sources 사용처 1곳');
+  assert.ok(codeOnly.includes("p.set('select', 'facility_id,sido_cd:raw->basis->>sidoCd,sggu_cd:raw->basis->>sgguCd');"));
   assert.equal(/ingestion_runs/.test(codeOnly), false);
 });
 
@@ -596,7 +597,10 @@ test('정적: 모든 사용자 값이 URLSearchParams 를 거쳐 인코딩된다
   const src = read('api/hospital/facilities.js');
   // sido/sigungu/or 를 URLSearchParams 인스턴스에 append 한다
   assert.ok(/new URLSearchParams\(\)/.test(src));
-  assert.ok(/p\.append\('sido', `eq\.\$\{sidoR\.value\}`\)/.test(src));
+  assert.ok(/p\.append\('sido', regionFilter\(sidoR\.values\)\)/.test(src));
+  assert.ok(/p\.append\('sigungu_nm', regionFilter\(sigunguR\.values\)\)/.test(src));
+  // regionFilter 는 parseRegion(문자·숫자·공백·하이픈만) 을 통과한 값만 받는다 — 하나라도 위반이면 400
+  assert.ok(/if \(!r \|\| r\.bad\) return \{ bad: true \};/.test(src));
   assert.ok(/p\.append\('or', `\(name\.ilike/.test(src));
   // 원문 sb 경로에 사용자 값을 백틱으로 직접 이어붙이지 않는다 (facilities 조회)
   assert.equal(/sb\(`facilities\?[^`]*\$\{(sidoR|sigunguR|qTerm|query\.)/.test(src), false);
