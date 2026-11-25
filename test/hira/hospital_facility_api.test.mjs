@@ -68,6 +68,15 @@ function seededSb(extra = {}) {
         source_reference: 'internal-ref', collected_at: '2026-06-01T00:00:00.000Z', created_at: 'x',
       },
     ],
+    // mockSb 는 select 를 무시하므로 원문(raw)·요양기호까지 그대로 돌려준다 → 응답에는
+    //  detail_status 만 나가야 한다(아래 시험). departments 는 raw->>departments 의 텍스트 흉내.
+    facility_sources: [
+      {
+        id: 7, facility_id: HID, source_system: 'hira_hospital_ingest', external_id: 'JDQ4_RAW_YKIHO',
+        departments: '[{"dgsbjtCdNm":"내과"}]', raw: { basis: { ykiho: 'RAW', addr: '원문주소' } },
+        normalized_hash: 'hash-x',
+      },
+    ],
     ...extra,
   });
 }
@@ -228,18 +237,41 @@ test('profile·evaluation 둘 다 없음 → 200, 시설만', async () => {
   assert.equal(res.body.facility.id, HID);
 });
 
-test('조회는 병렬 3개, facility_sources·ingestion_runs 는 조회 안 함', async () => {
+test('조회는 병렬 4개, facility_sources 는 진료과 칸 1개만, ingestion_runs 조회 안 함', async () => {
   const sb = seededSb();
   const res = mkRes();
   await H({ sb })(mkReq({ query: { id: HID } }), res);
   const tables = sb.calls.map((c) => c.table);
-  assert.deepEqual([...new Set(tables)].sort(), ['facilities', 'facility_evaluations', 'hospital_profiles']);
-  assert.equal(tables.filter((t) => t === 'facilities').length, 1);
-  assert.equal(tables.filter((t) => t === 'hospital_profiles').length, 1);
-  assert.equal(tables.filter((t) => t === 'facility_evaluations').length, 1);
-  assert.equal(sb.calls.some((c) => c.table === 'facility_sources' || c.table === 'ingestion_runs'), false);
+  assert.deepEqual([...new Set(tables)].sort(), ['facilities', 'facility_evaluations', 'facility_sources', 'hospital_profiles']);
+  for (const t of ['facilities', 'hospital_profiles', 'facility_evaluations', 'facility_sources']) {
+    assert.equal(tables.filter((x) => x === t).length, 1, t);
+  }
+  const src = sb.calls.find((c) => c.table === 'facility_sources');
+  assert.equal(src.params.select, 'departments:raw->>departments');
+  assert.ok(src.filters.some((f) => f.col === 'source_system' && f.op === 'eq' && f.val === 'hira_hospital_ingest'));
+  assert.equal(sb.calls.some((c) => c.table === 'ingestion_runs'), false);
   // 전부 GET (write 0)
   assert.ok(sb.calls.every((c) => c.method === 'GET'));
+});
+
+test('detail_status: 진료과 칸이 배열이면 collected(0개 포함), 없거나 null 이면 not_collected — 원문 미노출', async () => {
+  const cases = [
+    ['[{"dgsbjtCdNm":"내과"}]', 'collected'],
+    ['[]', 'collected'],
+    [null, 'not_collected'],
+    [undefined, 'not_collected'],
+  ];
+  for (const [dep, want] of cases) {
+    const extra = { facility_sources: dep === undefined ? [] : [{ facility_id: HID, source_system: 'hira_hospital_ingest', departments: dep, raw: { x: 1 }, external_id: 'RAWYK' }] };
+    const res = mkRes();
+    // eslint-disable-next-line no-await-in-loop
+    await H({ sb: seededSb(extra) })(mkReq({ query: { id: HID } }), res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.detail_status, want, String(dep));
+    assert.deepEqual(Object.keys(res.body).sort(), ['detail_status', 'evaluation', 'facility', 'profile']);
+    const blob = JSON.stringify(res.body);
+    assert.equal(/RAWYK|JDQ4_RAW_YKIHO|dgsbjtCdNm|원문주소|normalized_hash/.test(blob), false);
+  }
 });
 
 test('DB 오류 → 503 db_unavailable, 내부 원문 미노출', async () => {
@@ -287,8 +319,10 @@ test('정적: 공개 whitelist 가 코드에 상수로 명시됨', () => {
   for (const bad of ['hira_ykiho', 'external_id', 'normalized_hash', 'monthly_fee', 'is_partner', 'raw']) {
     assert.equal(new RegExp(`PUBLIC[^]*?'${bad}'`).test(src.replace(/\/\/[^\n]*/g, '')), false, `whitelist 에 ${bad}`);
   }
-  // facility_sources / ingestion_runs 조회 없음
-  assert.equal(/sb\(`?facility_sources/.test(src), false);
+  // facility_sources 는 진료과 칸 1개 select 로만, ingestion_runs 조회 없음
+  const srcCalls = src.match(/sb\(`facility_sources[^`]*`/g) || [];
+  assert.equal(srcCalls.length, 1);
+  assert.ok(srcCalls[0].includes('&select=departments:raw->>departments&limit=1'));
   assert.equal(/sb\(`?ingestion_runs/.test(src), false);
 });
 

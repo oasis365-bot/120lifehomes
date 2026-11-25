@@ -436,3 +436,37 @@ test('엔드포인트는 1B-1 실측 현행판 (폐기판으로 fallback 하지 
   assert.equal(HIRA_ENDPOINTS.detail.base, 'https://apis.data.go.kr/B551182/MadmDtlInfoService2.8');
   assert.equal(HIRA_ENDPOINTS.detail.ops.facility, 'getEqpInfo2.8');
 });
+
+test('onCall: 호출마다 호출 종류·시도 번호·소요 ms·결과 분류만 알린다(키·주소 없음)', async () => {
+  let t = 1000;
+  let n = 0;
+  const ff = async () => {
+    n += 1;
+    t += n === 1 ? 7000 : 120; // 1차: 7초 뒤 끊김, 2차: 0.12초 응답
+    if (n === 1) { const err = new Error('The operation was aborted'); err.name = 'AbortError'; throw err; }
+    return { status: 200, text: async () => fx('hospBasisList_one.json') };
+  };
+  const seen = [];
+  const c = createHiraClient({
+    key: 'secret-key-xyz', fetchImpl: ff, sleepImpl: fakeSleep(), minIntervalMs: 0, now: () => t,
+    onCall: (info) => seen.push(info),
+  });
+  await c.listHospitals({ numOfRows: 1 });
+  assert.equal(seen.length, 2);
+  assert.deepEqual(Object.keys(seen[0]).sort(), ['attempt', 'ms', 'op', 'outcome']);
+  assert.equal(seen[0].attempt, 1);
+  assert.equal(seen[0].ms, 7000);
+  assert.equal(seen[0].outcome, 'timeout');
+  assert.equal(seen[1].attempt, 2);
+  assert.equal(seen[1].ms, 120);
+  assert.equal(seen[1].outcome, 'http_200');
+  assert.equal(seen[0].op, seen[1].op);
+  assert.doesNotMatch(JSON.stringify(seen), /secret-key-xyz|serviceKey|https?:|\?/);
+});
+
+test('onCall 이 throw 해도 수집은 계속된다', async () => {
+  const ff = async () => ({ status: 200, text: async () => fx('hospBasisList_one.json') });
+  const c = createHiraClient({ key: 'k', fetchImpl: ff, sleepImpl: fakeSleep(), minIntervalMs: 0, onCall: () => { throw new Error('log down'); } });
+  const r = await c.listHospitals({ numOfRows: 1 });
+  assert.equal(r.resultCode, '00');
+});

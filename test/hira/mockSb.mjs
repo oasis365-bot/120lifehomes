@@ -50,6 +50,12 @@ export function makeMockSb(seed = {}) {
     return { table, params, filters };
   }
 
+  function likeMatch(cur, pattern) {
+    if (cur === null || cur === undefined) return false;
+    const re = new RegExp(`^${String(pattern).split('*').map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`);
+    return re.test(String(cur));
+  }
+
   function match(row, filters) {
     return filters.every((f) => {
       if (f.op === 'or') {
@@ -63,6 +69,14 @@ export function makeMockSb(seed = {}) {
         });
       }
       const cur = row[f.col];
+      // like.<패턴>(* = 임의 문자열), not.<op>.<값> — 요양원 격리 시험용
+      if (f.op === 'like') return likeMatch(cur, f.val);
+      if (f.op === 'ilike') return cur != null && likeMatch(String(cur).toLowerCase(), String(f.val).toLowerCase());
+      if (f.op === 'not') {
+        const dot = String(f.val).indexOf('.');
+        const inner = { col: f.col, op: String(f.val).slice(0, dot), val: String(f.val).slice(dot + 1) };
+        return !match(row, [inner]);
+      }
       if (f.op === 'is') return f.val === 'null' ? cur === null || cur === undefined : String(cur) === f.val;
       if (f.op === 'eq') return String(cur) === f.val;
       if (f.op === 'in') {

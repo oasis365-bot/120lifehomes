@@ -441,6 +441,8 @@ test('컨트롤러: 최신 요청만 화면에 반영 (경쟁 응답 무시)', a
   const resolvers = [];
   const f = (url) => {
     if (String(url).indexOf('/api/flags') >= 0) return Promise.resolve(mkRes(200, { hospital_module: true }));
+    // 지역 선택지(view=regions)는 바로 응답 — 경쟁 대상은 목록 요청뿐
+    if (String(url).indexOf('view=regions') >= 0) return Promise.resolve(mkRes(200, { regions: [] }));
     return new Promise((resolve) => { resolvers.push({ url: String(url), resolve }); });
   };
   f.calls = [];
