@@ -412,9 +412,9 @@
     var ctrl = null;
     var lastWasLastPage = false;
     var state = readState();
-
-    populateRegions();
-    applyStateToForm();
+    // 지역 선택지 = API(view=regions)가 돌려준 "DB 에 실제 저장된 값"만.
+    //  null = 아직 못 받음/실패. 화면 선택값과 검색 조건이 항상 같도록 다른 이름으로 바꾸지 않는다.
+    var regionList = null;
 
     return checkHospitalFlag(fetchImpl).then(function (on) {
       if (!on) {
@@ -424,6 +424,50 @@
       }
       show(elPrep, false);
       show(elSearch, true);
+      return loadRegions().then(function (list) {
+        regionList = list;
+        // 목록에 없는 지역(예: 예전 링크의 다른 지역명)은 조건에서 뺀다 → 화면과 조건 일치.
+        if (regionList) {
+          var sg = sigunguOf(state.sido);
+          if (!sg) { state.sido = ''; state.sigungu = ''; }
+          else if (state.sigungu && sg.indexOf(state.sigungu) < 0) state.sigungu = '';
+        }
+        populateRegions();
+        applyStateToForm();
+        start();
+      });
+    });
+
+    function loadRegions() {
+      return Promise.resolve().then(function () {
+        return fetchImpl('/api/hospital/facilities?view=regions', {});
+      }).then(function (r) {
+        if (!r || !r.ok) return null;
+        return r.json().then(function (data) {
+          var arr = data && Array.isArray(data.regions) ? data.regions : null;
+          if (!arr) return null;
+          var out = [];
+          for (var i = 0; i < arr.length; i++) {
+            var it = arr[i];
+            if (!it || typeof it.sido !== 'string' || !it.sido) continue;
+            var names = [];
+            var sgs = Array.isArray(it.sigungu) ? it.sigungu : [];
+            for (var j = 0; j < sgs.length; j++) {
+              if (sgs[j] && typeof sgs[j].name === 'string' && sgs[j].name) names.push(sgs[j].name);
+            }
+            out.push({ sido: it.sido, sigungu: names });
+          }
+          return out;
+        });
+      }).catch(function () { return null; });
+    }
+    function sigunguOf(sido) {
+      if (!regionList || !sido) return null;
+      for (var i = 0; i < regionList.length; i++) if (regionList[i].sido === sido) return regionList[i].sigungu;
+      return null;
+    }
+
+    function start() {
 
       if (elForm) {
         elForm.addEventListener('submit', function (e) {
@@ -452,7 +496,7 @@
 
       // 최초: URL 에 조건이 있으면 즉시 검색, 없으면 전체 첫 페이지
       run(false);
-    });
+    }
 
     /* ---- 내부 ---- */
 
@@ -479,40 +523,32 @@
       populateSigungu(state.sido || '');
       if (elSigungu) elSigungu.value = state.sigungu || '';
     }
+    function addOption(sel, value, label) {
+      var o = d.createElement('option');
+      o.value = value; o.textContent = label;
+      sel.appendChild(o);
+    }
     function populateRegions() {
-      if (!elSido || typeof REGIONS === 'undefined') return;
-      var seen = {};
-      for (var i = 0; i < REGIONS.length; i++) {
-        var r = REGIONS[i];
-        var full = (typeof SIDO_FULL !== 'undefined' && SIDO_FULL[r.name]) || r.name;
-        if (seen[full]) continue; seen[full] = 1;
-        var o = d.createElement('option');
-        o.value = full; o.textContent = full;
-        elSido.appendChild(o);
+      if (!elSido) return;
+      elSido.textContent = '';
+      addOption(elSido, '', '전국');
+      if (regionList) {
+        for (var i = 0; i < regionList.length; i++) addOption(elSido, regionList[i].sido, regionList[i].sido);
+      } else if (state.sido) {
+        // 지역 목록을 못 받은 경우: 지금 조건만 그대로 보여 준다(화면과 조건 일치).
+        addOption(elSido, state.sido, state.sido);
       }
     }
-    function populateSigungu(sidoFullName) {
+    function populateSigungu(sido) {
       if (!elSigungu) return;
       elSigungu.textContent = '';
-      var first = d.createElement('option');
-      first.value = ''; first.textContent = '시·군·구 전체';
-      elSigungu.appendChild(first);
-      if (typeof REGIONS === 'undefined' || typeof SIGUNGU === 'undefined' || !sidoFullName) return;
-      var region = null;
-      for (var i = 0; i < REGIONS.length; i++) {
-        var full = (typeof SIDO_FULL !== 'undefined' && SIDO_FULL[REGIONS[i].name]) || REGIONS[i].name;
-        if (full === sidoFullName) { region = REGIONS[i]; break; }
+      addOption(elSigungu, '', '시·군·구 전체');
+      if (!sido) return;
+      var names = sigunguOf(sido);
+      if (!names) {
+        if (!regionList && state.sigungu && state.sido === sido) addOption(elSigungu, state.sigungu, state.sigungu);
+        return;
       }
-      if (!region) return;
-      var names = [];
-      var seen = {};
-      Object.keys(SIGUNGU).forEach(function (code) {
-        if (code.slice(0, 2) !== region.cd) return;
-        var nm = SIGUNGU[code];
-        if (seen[nm]) return; seen[nm] = 1;
-        names.push(nm);
-      });
-      names.sort(function (a, b) { return a.localeCompare(b, 'ko'); });
       names.forEach(function (nm) {
         var o = d.createElement('option');
         o.value = nm; o.textContent = nm;

@@ -41,6 +41,45 @@ const EVALUATION_PUBLIC = Object.freeze([
 const PROFILE_SELECT = Object.freeze(['facility_id', ...PROFILE_PUBLIC]);
 const EVAL_SELECT = Object.freeze(['facility_id', 'id', ...EVALUATION_PUBLIC]);
 
+// ── view=regions: 화면 지역 선택지를 "DB 에 실제 저장된 값"으로만 만든다 ──
+//  HIRA 원본 시도·시군구명(예: '전남광주', '세종시', '수원장안구', '광주동구')을 바꾸지 않고
+//  그대로 돌려준다 → 화면 선택값 = 검색 조건(sido / sigungu_nm 정확 일치)이 항상 같다.
+//  한쪽 지역으로 치환·추정하지 않는다. Supabase max-rows(1000) 때문에 페이지로 나눠 읽는다.
+const REGION_PAGE = 1000;
+const REGION_MAX_PAGES = 20; // 2만 행 상한(현재 약 1,300행) — 무한 루프 방지
+const koCompare = (a, b) => String(a).localeCompare(String(b), 'ko');
+
+async function loadRegions(sb) {
+  const counts = new Map(); // sido -> { count, sigungu: Map(name -> count) }
+  for (let i = 0; i < REGION_MAX_PAGES; i += 1) {
+    const p = new URLSearchParams();
+    p.set('select', 'sido,sigungu_nm');
+    p.append('domain', 'eq.HOSPITAL');
+    p.append('order', 'id.asc');
+    p.append('offset', String(i * REGION_PAGE));
+    p.append('limit', String(REGION_PAGE));
+    const { data } = await sb(`facilities?${p.toString()}`);
+    const rows = Array.isArray(data) ? data : [];
+    for (const r of rows) {
+      const sido = r && typeof r.sido === 'string' ? r.sido.trim() : '';
+      if (!sido) continue;
+      if (!counts.has(sido)) counts.set(sido, { count: 0, sigungu: new Map() });
+      const e = counts.get(sido);
+      e.count += 1;
+      const sg = r && typeof r.sigungu_nm === 'string' ? r.sigungu_nm.trim() : '';
+      if (sg) e.sigungu.set(sg, (e.sigungu.get(sg) || 0) + 1);
+    }
+    if (rows.length < REGION_PAGE) break;
+  }
+  return [...counts.entries()]
+    .sort((a, b) => koCompare(a[0], b[0]))
+    .map(([sido, e]) => ({
+      sido,
+      count: e.count,
+      sigungu: [...e.sigungu.entries()].sort((a, b) => koCompare(a[0], b[0])).map(([name, count]) => ({ name, count })),
+    }));
+}
+
 const DEFAULT_SIZE = 20;
 const MAX_SIZE = 50;
 const Q_MAX = 100;
@@ -97,6 +136,13 @@ export function createHandler(deps = {}) {
 
     const query = req.query && typeof req.query === 'object' ? req.query : {};
 
+    // view: 미지정 = 목록(기존 계약), 'regions' = 지역 선택지. 그 밖의 값은 400.
+    let view = 'list';
+    if (query.view !== undefined && query.view !== '') {
+      if (query.view !== 'regions') { res.status(400).json({ error: 'invalid_view' }); return; }
+      view = 'regions';
+    }
+
     // ── 입력 검증 (DB 조회 전) — 알 수 없는 파라미터는 무시(기존 api/facilities.js 계약) ──
     let page = 1;
     if (query.page !== undefined) {
@@ -146,6 +192,18 @@ export function createHandler(deps = {}) {
     }
     if (!flagOn(flags, HOSPITAL_MODULE_FLAG)) {
       res.status(404).json({ error: 'not_found' });
+      return;
+    }
+
+    if (view === 'regions') {
+      try {
+        const regions = await loadRegions(sb);
+        res.status(200).json({ regions });
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error('[hospital/facilities] db error:', (e && e.name) || 'Error');
+        res.status(503).json({ error: 'db_unavailable' });
+      }
       return;
     }
 

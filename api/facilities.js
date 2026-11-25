@@ -5,8 +5,9 @@
 //   domain 처리:
 //     · feature_flags.hospital_module = OFF  → 항상 요양원만 (domain 파라미터 무시).
 //       응답 형태·결과 모두 기존과 동일 (select 에 domain 미포함).
-//     · hospital_module = ON  → domain 파라미터로 탭 필터
-//         LTC / HOSPITAL → 해당 유형만,  ALL 또는 미지정 → 둘 다.
+//     · hospital_module = ON  → 미지정·LTC·그 밖의 값 → 요양원만(기존 화면 결과 유지).
+//         HOSPITAL → 요양병원만, ALL(명시할 때만) → 둘 다.
+//       기존 요양원 화면(search.html·홈)은 domain 을 보내지 않으므로 ON 이어도 요양원만 본다.
 //     · 마이그레이션(001) 전  → domain 컬럼을 아예 참조하지 않음 (완전 무변경).
 import { haveDb, sb } from '../lib/db.js';
 import { getFlags, flagOn } from '../lib/flags.js';
@@ -46,14 +47,19 @@ export default async function handler(req, res) {
   if (schemaReady) {
     if (hospitalOn) {
       const d = String(q.domain || '').toUpperCase();
-      if (d === 'LTC' || d === 'HOSPITAL') p.append('domain', `eq.${d}`);
-      // '' | 'ALL' → 필터 없음 (요양원 + 요양병원)
+      if (d === 'HOSPITAL') p.append('domain', 'eq.HOSPITAL');
+      else if (d !== 'ALL') p.append('domain', 'eq.LTC');
+      // 'ALL' 을 명시한 경우만 필터 없음 (요양원 + 요양병원)
     } else {
       // 병원 모듈 OFF: 병원 데이터가 존재하더라도 완전히 숨김. 결과는 기존과 동일.
       p.append('domain', 'eq.LTC');
     }
   }
-  // schemaReady=false (마이그레이션 전): domain 절 없음 → 기존 동작 그대로
+  // schemaReady=false (마이그레이션 전 또는 flag 표를 아직 못 읽은 새 서버): domain 컬럼을
+  //  참조하지 않되, 병원 id 형식("H-…")으로 요양병원 행을 제외한다 — id 컬럼은 항상 있다.
+  else {
+    p.append('id', 'not.like.H-*');
+  }
 
   const order = q.sort === 'new' ? 'established_at.desc.nullslast,name.asc' : 'name.asc';
   p.append('order', order);
