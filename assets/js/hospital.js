@@ -86,15 +86,32 @@
     return u.href;
   }
 
+  // 상세정보 상태 문구(대표 확정 문구 — 바꾸지 말 것)
+  var DETAIL_NOT_COLLECTED_TEXT = '상세정보를 아직 확인하지 못했습니다';
+  var EVAL_NONE_TEXT = '제공된 자료에 평가 결과가 없습니다';
+
   // 목록 API 요청 URL — 사용자 입력은 URLSearchParams 값으로만 전달
-  function buildListUrl(state) {
+  //  expand(선택): { sido: [원본 이름…], sigungu: [원본 이름…] } — 같은 공식 코드로 묶인
+  //  선택지는 묶인 원본 이름 전부로 검색한다(최대 5개, 서버 상한과 같음).
+  function buildListUrl(state, expand) {
     var p = new URLSearchParams();
     if (hasValue(state.q)) p.set('q', String(state.q).trim());
-    if (hasValue(state.sido)) p.set('sido', String(state.sido).trim());
-    if (hasValue(state.sigungu)) p.set('sigungu', String(state.sigungu).trim());
+    appendRegion(p, 'sido', state.sido, expand && expand.sido);
+    appendRegion(p, 'sigungu', state.sigungu, expand && expand.sigungu);
     p.set('page', String(Math.max(1, parseInt(state.page, 10) || 1)));
     p.set('size', String(PAGE_SIZE));
     return API_LIST + '?' + p.toString();
+  }
+
+  function appendRegion(p, key, value, names) {
+    if (!hasValue(value)) return;
+    var v = String(value).trim();
+    var list = Array.isArray(names) && names.length ? names.slice(0, 5) : [v];
+    var seen = {};
+    for (var i = 0; i < list.length; i++) {
+      var n = String(list[i] == null ? '' : list[i]).trim();
+      if (n && !seen[n]) { seen[n] = true; p.append(key, n); }
+    }
   }
 
   function buildDetailUrl(id) {
@@ -351,6 +368,15 @@
       root.appendChild(section('적정성평가', [table(evRows.filter(Boolean)), note]));
     }
 
+    // 상세정보 상태 — 빈칸을 숨기기만 하지 않고 "아직 못 받음"과 "자료에 없음"을 구분한다.
+    //  0점·낮은 등급처럼 보이는 표시나 "진료과 없음" 같은 단정은 하지 않는다.
+    var hasEval = !!(evalv && (hasValue(evalv.grade) || hasValue(evalv.evaluation_name)));
+    if (data.detail_status === 'not_collected') {
+      root.appendChild(section('상세정보', [el('p', { className: 'h-note', text: DETAIL_NOT_COLLECTED_TEXT })]));
+    } else if (data.detail_status === 'collected' && !hasEval) {
+      root.appendChild(section('적정성평가', [el('p', { className: 'h-note', text: EVAL_NONE_TEXT })]));
+    }
+
     // 목록으로 돌아가기
     var backHref = hasValue(opts.backSearch) ? ('hospital.html' + opts.backSearch) : 'hospital.html';
     var back = el('a', { className: 'h-back', text: '← 목록으로 돌아가기', attrs: { href: backHref } });
@@ -427,10 +453,15 @@
       return loadRegions().then(function (list) {
         regionList = list;
         // 목록에 없는 지역(예: 예전 링크의 다른 지역명)은 조건에서 뺀다 → 화면과 조건 일치.
+        //  같은 공식 코드로 묶인 다른 원본 이름(예: 예전 링크의 '전라남도')은 그 묶음의 선택지로 맞춘다.
         if (regionList) {
-          var sg = sigunguOf(state.sido);
-          if (!sg) { state.sido = ''; state.sigungu = ''; }
-          else if (state.sigungu && sg.indexOf(state.sigungu) < 0) state.sigungu = '';
+          var grp = findGroup(regionList, state.sido);
+          if (!grp) { state.sido = ''; state.sigungu = ''; }
+          else {
+            state.sido = grp.sido;
+            var sgrp = state.sigungu ? findGroup(grp.sigungu, state.sigungu) : null;
+            state.sigungu = sgrp ? sgrp.sido : '';
+          }
         }
         populateRegions();
         applyStateToForm();
@@ -446,25 +477,50 @@
         return r.json().then(function (data) {
           var arr = data && Array.isArray(data.regions) ? data.regions : null;
           if (!arr) return null;
+          // 내부 형태: [{ sido: 선택지 이름, names: [원본 이름…], sigungu: [{ sido: 이름, names: […] }] }]
           var out = [];
           for (var i = 0; i < arr.length; i++) {
             var it = arr[i];
             if (!it || typeof it.sido !== 'string' || !it.sido) continue;
-            var names = [];
             var sgs = Array.isArray(it.sigungu) ? it.sigungu : [];
+            var subs = [];
             for (var j = 0; j < sgs.length; j++) {
-              if (sgs[j] && typeof sgs[j].name === 'string' && sgs[j].name) names.push(sgs[j].name);
+              if (sgs[j] && typeof sgs[j].name === 'string' && sgs[j].name) {
+                subs.push({ sido: sgs[j].name, names: nameList(sgs[j].name, sgs[j].names) });
+              }
             }
-            out.push({ sido: it.sido, sigungu: names });
+            out.push({ sido: it.sido, names: nameList(it.sido, it.names), sigungu: subs });
           }
           return out;
         });
       }).catch(function () { return null; });
     }
-    function sigunguOf(sido) {
-      if (!regionList || !sido) return null;
-      for (var i = 0; i < regionList.length; i++) if (regionList[i].sido === sido) return regionList[i].sigungu;
+    function nameList(label, names) {
+      var out = [label];
+      if (Array.isArray(names)) {
+        for (var i = 0; i < names.length; i++) {
+          if (typeof names[i] === 'string' && names[i] && out.indexOf(names[i]) < 0) out.push(names[i]);
+        }
+      }
+      return out;
+    }
+    // 선택지 이름 또는 묶인 원본 이름 어느 쪽으로든 묶음을 찾는다.
+    function findGroup(list, value) {
+      if (!list || !value) return null;
+      for (var i = 0; i < list.length; i++) if (list[i].sido === value) return list[i];
+      for (var k = 0; k < list.length; k++) if (list[k].names.indexOf(value) >= 0) return list[k];
       return null;
+    }
+    function sigunguOf(sido) {
+      var g = findGroup(regionList, sido);
+      if (!g) return null;
+      return g.sigungu.map(function (s) { return s.sido; });
+    }
+    function expandFor(st) {
+      var g = findGroup(regionList, st.sido);
+      if (!g) return null;
+      var sg = st.sigungu ? findGroup(g.sigungu, st.sigungu) : null;
+      return { sido: g.names, sigungu: sg ? sg.names : null };
     }
 
     function start() {
@@ -579,7 +635,7 @@
       if (elCount) elCount.textContent = '검색 중…';
       setStatus('요양병원 정보를 불러오는 중입니다…', true);
 
-      var url = buildListUrl(state);
+      var url = buildListUrl(state, expandFor(state));
       var opt = ctrl ? { signal: ctrl.signal } : {};
       fetchImpl(url, opt).then(function (r) {
         if (!r.ok) {

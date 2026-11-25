@@ -42,42 +42,108 @@ const PROFILE_SELECT = Object.freeze(['facility_id', ...PROFILE_PUBLIC]);
 const EVAL_SELECT = Object.freeze(['facility_id', 'id', ...EVALUATION_PUBLIC]);
 
 // ── view=regions: 화면 지역 선택지를 "DB 에 실제 저장된 값"으로만 만든다 ──
-//  HIRA 원본 시도·시군구명(예: '전남광주', '세종시', '수원장안구', '광주동구')을 바꾸지 않고
-//  그대로 돌려준다 → 화면 선택값 = 검색 조건(sido / sigungu_nm 정확 일치)이 항상 같다.
-//  한쪽 지역으로 치환·추정하지 않는다. Supabase max-rows(1000) 때문에 페이지로 나눠 읽는다.
+//  HIRA 원본 시도·시군구명(예: '전남광주', '세종시', '수원장안구')은 바꾸지 않는다.
+//  같은 공식 코드(HIRA 원본 sidoCd·sgguCd, facility_sources.raw.basis)에 이름이 둘 이상
+//  저장된 경우(예: 코드 360000 = '전남광주' 133곳 + 옛 표기 '전라남도' 1곳)에만 한 선택지로
+//  묶는다. 선택지 이름(label)은 새로 만들지 않고 그 묶음에서 가장 많이 쓰인 원본 이름을 쓰며,
+//  names 에 묶인 원본 이름을 모두 담는다 → 화면은 names 전부로 검색(sido=in.(...)).
+//  코드가 없는 행은 이름 그대로 한 묶음. 치환·추정 없음.
+//  Supabase max-rows(1000) 때문에 페이지로 나눠 읽는다. 코드는 응답에 내보내지 않는다.
 const REGION_PAGE = 1000;
 const REGION_MAX_PAGES = 20; // 2만 행 상한(현재 약 1,300행) — 무한 루프 방지
+const REGION_NAMES_MAX = 5; // 한 선택지에 묶을 수 있는 원본 이름 수 상한(목록 API 입력 상한과 같음)
 const koCompare = (a, b) => String(a).localeCompare(String(b), 'ko');
+const cleanStr = (v) => (typeof v === 'string' ? v.trim() : '');
 
-async function loadRegions(sb) {
-  const counts = new Map(); // sido -> { count, sigungu: Map(name -> count) }
+async function readAllPages(sb, table, build) {
+  const out = [];
   for (let i = 0; i < REGION_MAX_PAGES; i += 1) {
-    const p = new URLSearchParams();
-    p.set('select', 'sido,sigungu_nm');
-    p.append('domain', 'eq.HOSPITAL');
-    p.append('order', 'id.asc');
+    const p = build();
     p.append('offset', String(i * REGION_PAGE));
     p.append('limit', String(REGION_PAGE));
-    const { data } = await sb(`facilities?${p.toString()}`);
+    const { data } = await sb(`${table}?${p.toString()}`);
     const rows = Array.isArray(data) ? data : [];
-    for (const r of rows) {
-      const sido = r && typeof r.sido === 'string' ? r.sido.trim() : '';
-      if (!sido) continue;
-      if (!counts.has(sido)) counts.set(sido, { count: 0, sigungu: new Map() });
-      const e = counts.get(sido);
-      e.count += 1;
-      const sg = r && typeof r.sigungu_nm === 'string' ? r.sigungu_nm.trim() : '';
-      if (sg) e.sigungu.set(sg, (e.sigungu.get(sg) || 0) + 1);
-    }
+    out.push(...rows);
     if (rows.length < REGION_PAGE) break;
   }
-  return [...counts.entries()]
-    .sort((a, b) => koCompare(a[0], b[0]))
-    .map(([sido, e]) => ({
-      sido,
-      count: e.count,
-      sigungu: [...e.sigungu.entries()].sort((a, b) => koCompare(a[0], b[0])).map(([name, count]) => ({ name, count })),
-    }));
+  return out;
+}
+
+// 이름·코드를 노드로 하는 union-find. 같은 코드에 걸린 이름들 / 같은 이름에 걸린 코드들을 한 묶음으로.
+function makeGroups() {
+  const parent = new Map();
+  const find = (x) => {
+    if (!parent.has(x)) parent.set(x, x);
+    let r = x;
+    while (parent.get(r) !== r) r = parent.get(r);
+    parent.set(x, r);
+    return r;
+  };
+  const union = (a, b) => { const ra = find(a); const rb = find(b); if (ra !== rb) parent.set(rb, ra); };
+  return { find, union };
+}
+
+// names: Map(name -> count) → { label, names[] } (label = 가장 많이 쓰인 원본 이름, 동률이면 가나다순)
+function labelOf(names) {
+  const list = [...names.entries()].sort((a, b) => (b[1] - a[1]) || koCompare(a[0], b[0])).map(([n]) => n);
+  return { label: list[0], names: list.slice(0, REGION_NAMES_MAX) };
+}
+
+function groupRows(rows, nameKey, codeKey) {
+  const g = makeGroups();
+  for (const r of rows) {
+    g.find(`n:${r[nameKey]}`);
+    if (r[codeKey]) g.union(`n:${r[nameKey]}`, `c:${r[codeKey]}`);
+  }
+  const groups = new Map(); // root -> { names: Map, rows: [] }
+  for (const r of rows) {
+    const root = g.find(`n:${r[nameKey]}`);
+    if (!groups.has(root)) groups.set(root, { names: new Map(), rows: [] });
+    const e = groups.get(root);
+    e.names.set(r[nameKey], (e.names.get(r[nameKey]) || 0) + 1);
+    e.rows.push(r);
+  }
+  return [...groups.values()];
+}
+
+async function loadRegions(sb) {
+  const facs = await readAllPages(sb, 'facilities', () => {
+    const p = new URLSearchParams();
+    p.set('select', 'id,sido,sigungu_nm');
+    p.append('domain', 'eq.HOSPITAL');
+    p.append('order', 'id.asc');
+    return p;
+  });
+  // 공식 코드: HIRA 원본(raw.basis)의 sidoCd·sgguCd 만 읽는다. raw 자체는 읽지 않는다.
+  const srcs = await readAllPages(sb, 'facility_sources', () => {
+    const p = new URLSearchParams();
+    p.set('select', 'facility_id,sido_cd:raw->basis->>sidoCd,sggu_cd:raw->basis->>sgguCd');
+    p.append('source_system', 'eq.hira_hospital_ingest');
+    p.append('order', 'facility_id.asc');
+    return p;
+  });
+  const codeOf = new Map();
+  for (const s of srcs) {
+    const fid = cleanStr(s && s.facility_id);
+    if (fid && !codeOf.has(fid)) codeOf.set(fid, { sido: cleanStr(s.sido_cd), sggu: cleanStr(s.sggu_cd) });
+  }
+  const rows = [];
+  for (const f of facs) {
+    const sido = cleanStr(f && f.sido);
+    if (!sido) continue;
+    const c = codeOf.get(cleanStr(f.id)) || { sido: '', sggu: '' };
+    rows.push({ sido, sg: cleanStr(f.sigungu_nm), sidoCd: c.sido, sgguCd: c.sggu });
+  }
+
+  return groupRows(rows, 'sido', 'sidoCd')
+    .map((grp) => {
+      const { label, names } = labelOf(grp.names);
+      const sigungu = groupRows(grp.rows.filter((r) => r.sg), 'sg', 'sgguCd')
+        .map((sg) => { const l = labelOf(sg.names); return { name: l.label, names: l.names, count: sg.rows.length }; })
+        .sort((a, b) => koCompare(a.name, b.name));
+      return { sido: label, names, count: grp.rows.length, sigungu };
+    })
+    .sort((a, b) => koCompare(a.sido, b.sido));
 }
 
 const DEFAULT_SIZE = 20;
@@ -115,6 +181,30 @@ function parseRegion(raw) {
   if (v.length > REGION_MAX || CTRL_RE.test(v) || !REGION_RE.test(v)) return { bad: true };
   return { value: v };
 }
+
+// sido / sigungu 는 문자열 1개(기존 계약) 또는 같은 공식 코드로 묶인 원본 이름 여러 개
+//  (?sido=A&sido=B, 최대 REGION_NAMES_MAX). 하나라도 규칙 위반이면 전체 400.
+// 반환: null(없음) | {values:[...]} | {bad:true}
+function parseRegionList(raw) {
+  if (Array.isArray(raw)) {
+    if (raw.length === 0 || raw.length > REGION_NAMES_MAX) return { bad: true };
+    const values = [];
+    for (const one of raw) {
+      const r = parseRegion(one);
+      if (!r || r.bad) return { bad: true }; // 빈 값 섞임도 거부
+      if (!values.includes(r.value)) values.push(r.value);
+    }
+    return { values };
+  }
+  const r = parseRegion(raw);
+  if (!r) return null;
+  return r.bad ? r : { values: [r.value] };
+}
+
+// 값은 REGION_RE(문자·숫자·공백·하이픈)만 통과했으므로 따옴표 안에 그대로 넣어도 안전하다.
+const regionFilter = (values) => (values.length === 1
+  ? `eq.${values[0]}`
+  : `in.(${values.map((v) => `"${v}"`).join(',')})`);
 
 /**
  * @param {object} [deps]
@@ -176,9 +266,9 @@ export function createHandler(deps = {}) {
       }
     }
 
-    const sidoR = parseRegion(query.sido);
+    const sidoR = parseRegionList(query.sido);
     if (sidoR && sidoR.bad) { res.status(400).json({ error: 'invalid_sido' }); return; }
-    const sigunguR = parseRegion(query.sigungu);
+    const sigunguR = parseRegionList(query.sigungu);
     if (sigunguR && sigunguR.bad) { res.status(400).json({ error: 'invalid_sigungu' }); return; }
 
     // ── 기능 OFF → 존재 미노출. 병원 테이블(facilities/hospital_profiles/facility_evaluations)
@@ -216,9 +306,9 @@ export function createHandler(deps = {}) {
     const p = new URLSearchParams();
     p.set('select', FACILITY_PUBLIC.join(','));
     p.append('domain', 'eq.HOSPITAL'); // 코드 고정 — query.domain 은 읽지 않는다.
-    if (sidoR && sidoR.value) p.append('sido', `eq.${sidoR.value}`);
+    if (sidoR) p.append('sido', regionFilter(sidoR.values));
     // 병원 행은 facilities.sigungu 가 비어 있고 sigungu_nm 만 채워진다 → 정확 일치는 sigungu_nm 대상.
-    if (sigunguR && sigunguR.value) p.append('sigungu_nm', `eq.${sigunguR.value}`);
+    if (sigunguR) p.append('sigungu_nm', regionFilter(sigunguR.values));
     if (qTerm) p.append('or', `(name.ilike.*${qTerm}*,address.ilike.*${qTerm}*)`);
     p.append('order', 'name.asc,id.asc');
     p.append('offset', String((page - 1) * size));

@@ -255,7 +255,7 @@ test('잘못된 page/size/q → 400, 병원 테이블 조회 0', async () => {
     { page: '0' }, { page: 'abc' }, { page: '1.5' }, { page: '-1' },
     { size: '0' }, { size: 'abc' }, { size: '-3' }, { size: '1.5' },
     { q: 'x'.repeat(101) }, { q: `ab${String.fromCharCode(1)}cd` }, { q: ['a', 'b'] }, { q: 42 },
-    { sido: 'x'.repeat(61) }, { sido: `a${String.fromCharCode(9)}b` }, { sido: ['a'] }, { sigungu: ['a'] },
+    { sido: 'x'.repeat(61) }, { sido: `a${String.fromCharCode(9)}b` }, { sido: [] }, { sido: ['a', 'b', 'c', 'd', 'e', 'f'] }, { sigungu: ['a', ''] }, { sido: ['서울특별시', 'a&b'] }, { sigungu: [42] },
   ]) {
     const sb = seededSb();
     const res = mkRes();
