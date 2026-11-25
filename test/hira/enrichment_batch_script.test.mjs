@@ -414,3 +414,16 @@ test('워크플로 timeout-minutes 는 스크립트 요청 타임아웃(240s)보
   assert.equal(minutes, 10);
   assert.ok(minutes * 60_000 >= REQUEST_TIMEOUT_MS + 120_000, '러너 준비·정리 여유(2분) 포함');
 });
+
+test('summarize: 연결 점검 결과·시간 초과 수가 있으면 로그 줄에 싣고, 형식이 이상한 값은 버린다', () => {
+  const ok = summarize({ ok: true, httpStatus: 200, body: {
+    ok: true, status: 'item_retry', phase: 'enrichment', didWork: true, attempted: 1, completed: 0,
+    retried: 1, deadLettered: 0, timedOut: 1, netProbe: 'ok', netTcpMs: 180, netTlsMs: 420,
+  } });
+  assert.match(ok.line, /"timedOut":1/);
+  assert.match(ok.line, /"netProbe":"ok","netTcpMs":180,"netTlsMs":420/);
+  const bad = summarize({ ok: true, httpStatus: 200, body: {
+    ok: true, status: 'item_retry', phase: 'enrichment', didWork: true, netProbe: 'connect 1.2.3.4 secret',
+  } });
+  assert.doesNotMatch(bad.line, /netProbe|secret/);
+});
